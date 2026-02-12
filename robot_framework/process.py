@@ -16,7 +16,7 @@ import os, time, shutil, tempfile, mimetypes
 from email.message import EmailMessage
 import smtplib
 
-def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
+def process(orchestrator_connection: OrchestratorConnection) -> None:
     
     def Email(Modtagermail, file_name, file_path):
         SMTP_SERVER = "smtp.adm.aarhuskommune.dk"
