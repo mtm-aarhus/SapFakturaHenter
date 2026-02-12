@@ -12,7 +12,7 @@ FAIL_ROBOT_ON_TOO_MANY_ERRORS = False
 # Error screenshot config
 SMTP_SERVER = "smtp.adm.aarhuskommune.dk"
 SMTP_PORT = 25
-SCREENSHOT_SENDER = "opus@aarhus.dk"
+SCREENSHOT_SENDER = "sapfakturahenter@aarhus.dk"
 
 # Constant/Credential names
 ERROR_EMAIL = "balas"
