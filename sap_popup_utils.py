@@ -48,7 +48,6 @@ def diagnose_sap_popup(timeout=10):
     Logger detaljer om alle SAP-relaterede popup-vinduer.
     Bruges til fejlsøgning.
     """
-    print("▶ Starter SAP-popup diagnosticering...")
     end_time = time.time() + timeout
 
     def enum_callback(hwnd, results):
@@ -81,7 +80,6 @@ def close_all_sap_popups(timeout=10):
       - Ignorerer hovedvinduer
       - Accepterer EITHER kendte nøgleord OR tydelig OK/JA/Tillad-knap
     """
-    print("▶ Søger og lukker kendte SAP-popups...")
     deadline = time.time() + timeout
     last_action_time = time.time()
 
