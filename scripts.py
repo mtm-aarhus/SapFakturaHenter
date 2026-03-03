@@ -12,6 +12,98 @@ from openpyxl import load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 import subprocess
 from pathlib import Path
+
+def MTMIkkeGodkendteTimer(orchestrator_connection=None):
+    SapGuiAuto = win32com.client.GetObject("SAPGUI")
+    application = SapGuiAuto.GetScriptingEngine
+    connection = application.Children(0)
+    session = connection.Children(0)
+
+    with sap_with_popup_guard():
+        # Opret SAP-objekter (som i VBS)
+        SapGuiAuto = win32com.client.GetObject("SAPGUI")
+        application = SapGuiAuto.GetScriptingEngine
+        connection = application.Children(0)
+        session = connection.Children(0)
+
+        # Trin som i VBS
+        session.findById("wnd[0]").maximize()
+        session.findById("wnd[0]/tbar[0]/okcd").text = "/ncats_da"
+        session.findById("wnd[0]").sendVKey(0)
+
+        # Variant
+        session.findById("wnd[0]/tbar[1]/btn[17]").press()
+        session.findById("wnd[1]/usr/txtV-LOW").text = "ikke godk. MTM"
+        session.findById("wnd[1]/usr/txtV-LOW").caretPosition = len("ikke godk. MTM")
+        session.findById("wnd[1]/usr/txtENAME-LOW").text = ""
+        session.findById("wnd[1]/usr/txtENAME-LOW").caretPosition = 0
+        session.findById("wnd[1]/tbar[0]/btn[8]").press()
+
+        # Execute
+        session.findById("wnd[0]/tbar[1]/btn[8]").press()
+
+        # Hjælper: findes element?
+        def _exists(id_):
+            try:
+                session.findById(id_)
+                return True
+            except Exception:
+                return False
+
+        shell = session.findById("wnd[0]/usr/cntlCATS_DETAILS/shellcont/shell")
+
+        # 1) Ny recording-sti
+        try:
+            shell.pressToolbarButton("CX_TOOLBAR")
+            shell.pressToolbarButton("CX_TOOLBAR")
+            shell.pressToolbarContextButton("&MB_EXPORT")
+            shell.selectContextMenuItem("&XXL")
+        except Exception:
+            # 2) Gammel recording-sti (direkte export)
+            try:
+                shell.pressToolbarContextButton("&MB_EXPORT")
+                shell.selectContextMenuItem("&XXL")
+            except Exception:
+                shell.contextMenu()
+                shell.selectContextMenuItem("&XXL")
+        
+        # --- Hvis format-popup kommer (vælg XLSX) ---
+        try:
+            session.findById("wnd[1]/usr/cmbG_LISTBOX")
+            session.findById("wnd[1]/usr/radRB_OTHERS").select()
+            session.findById("wnd[1]/usr/cmbG_LISTBOX").Key = "10"
+            session.findById("wnd[1]/tbar[0]/btn[0]").press()
+        except Exception:
+            pass
+
+        # Vent på gem-dialogfelter (wnd[1])
+        deadline = time.time() + 10
+        while time.time() < deadline and not (
+            _exists("wnd[1]/usr/ctxtDY_PATH") and _exists("wnd[1]/usr/ctxtDY_FILENAME")
+        ):
+            time.sleep(0.1)
+        excel_before = _pids()
+
+        session.findById("wnd[1]/usr/ctxtDY_PATH").text = os.getcwd()
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = "ikkegodkendtetimer.xlsx"
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len("ikkegodkendtetimer.xlsx")
+        session.findById("wnd[1]").sendVKey(0)
+
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[3]").press()
+        except Exception:
+            pass
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[3]").press()
+        except Exception:
+            pass
+
+    # Luk eventuelle NYE Excel-processer (åbner ofte forsinket)
+    new_pids = close_new_excels(excel_before, wait_seconds=30)
+    print(f"Lukkede Excel PIDs: {sorted(new_pids)}")
+
+    # Luk ALT SAP (alle sessions/forbindelser)
+    close_all_sap()
 def SDStamdataTabel(orchestrator_connection = None):
     SapGuiAuto = win32com.client.GetObject("SAPGUI")
     application = SapGuiAuto.GetScriptingEngine
