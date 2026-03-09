@@ -10,7 +10,7 @@ from email.message import EmailMessage
 import smtplib
 import mimetypes
 from robot_framework.initialize_sap import initialize_sap
-from scripts import SDLonUdtrak, InputToTemplate, SDForfaldneFaktura, SDStamdataTabel, MTMIkkeGodkendteTimer
+from scripts import SDLonUdtrak, InputToTemplate, SDForfaldneFaktura, SDStamdataTabel, MTMIkkeGodkendteTimer, SDAfstemning
 from sap_popup_utils import start_popup_watcher
 import os, time, shutil, tempfile, mimetypes
 from email.message import EmailMessage
@@ -192,10 +192,31 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
         {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
         {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
+        {"RunName": "SDAfstemning", "UploadMappe": "SP"},
     ]
 
     for run in runs:
-        if run["RunName"] == "SD løn udtræk":
+        if run["RunName"] == "SDAfstemning":
+            sap_running = initialize_sap(orchestrator_connection)
+            if not sap_running:
+                raise Exception("SAP failed to launch successfully")
+            else:
+                print("SAP is running and ready.")
+            watcher = start_popup_watcher(interval= 0.3)
+            try:
+                print("▶ Starter SD løn udtræk")
+                SDAfstemning()
+                
+            finally:
+                watcher.stop()
+    
+            cwd = os.getcwd()
+            filepath = os.path.join(cwd, "Opus data til afst.xlsx")
+            
+    
+            upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+            file_deleter(filepath)
+        elif run["RunName"] == "SD løn udtræk":
             sap_running = initialize_sap(orchestrator_connection)
             if not sap_running:
                 raise Exception("SAP failed to launch successfully")
