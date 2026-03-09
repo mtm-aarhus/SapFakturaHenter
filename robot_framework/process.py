@@ -204,7 +204,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 print("SAP is running and ready.")
             watcher = start_popup_watcher(interval= 0.3)
             try:
-                print("▶ Starter SD løn udtræk")
+                print("▶ Starter SD afstemning")
                 SDAfstemning()
                 
             finally:
