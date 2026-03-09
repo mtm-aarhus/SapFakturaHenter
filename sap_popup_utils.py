@@ -174,7 +174,6 @@ def close_all_sap_popups(timeout=10):
 
         # Stop hvis der ikke er flere relevante popups i et par sekunder
         if not any_closed and time.time() - last_action_time > 2:
-            print("✅ Ingen flere relevante SAP-popups.")
             return True
 
         time.sleep(0.3)
