@@ -13,6 +13,57 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 import subprocess
 from pathlib import Path
 
+def SDAfstemning(orchestrator_connection=None):
+    SapGuiAuto = win32com.client.GetObject("SAPGUI")
+    application = SapGuiAuto.GetScriptingEngine
+    connection = application.Children(0)
+    session = connection.Children(0)
+
+    with sap_with_popup_guard():
+        session.findById("wnd[0]").maximize()
+        session.findById("wnd[0]/tbar[0]/okcd").text = "cji3"
+        session.findById("wnd[0]").sendVKey(0)
+
+        # Variant
+        session.findById("wnd[0]/tbar[1]/btn[17]").press()
+        session.findById("wnd[1]/usr/txtV-LOW").text = "SD Afstemning"
+        session.findById("wnd[1]/usr/txtENAME-LOW").text = ""
+        session.findById("wnd[1]/usr/txtENAME-LOW").setFocus()
+        session.findById("wnd[1]/usr/txtENAME-LOW").caretPosition = 0
+        session.findById("wnd[1]/tbar[0]/btn[8]").press()
+
+        # Kør rapport
+        session.findById("wnd[0]/tbar[1]/btn[8]").press()
+
+        # Snapshot af Excel-processer før eksport
+        excel_before = _pids()
+
+        # Eksport
+        session.findById("wnd[0]/tbar[1]/btn[43]").press()
+
+        # Gem fil i current working directory
+        session.findById("wnd[1]/usr/ctxtDY_PATH").text = os.getcwd()
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = "Opus data til afst.xlsx"
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len("Opus data til afst.xlsx")
+        session.findById("wnd[1]/tbar[0]/btn[11]").press()
+
+        # Luk tilbage
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[15]").press()
+        except Exception:
+            pass
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[15]").press()
+        except Exception:
+            pass
+
+    # Luk eventuelle nye Excel-processer
+    new_pids = close_new_excels(excel_before, wait_seconds=30)
+    print(f"Lukkede Excel PIDs: {sorted(new_pids)}")
+
+    # Luk ALT SAP
+    close_all_sap()
+    
 def MTMIkkeGodkendteTimer(orchestrator_connection=None):
     SapGuiAuto = win32com.client.GetObject("SAPGUI")
     application = SapGuiAuto.GetScriptingEngine
