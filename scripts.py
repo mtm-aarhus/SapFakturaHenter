@@ -12,6 +12,168 @@ from openpyxl import load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 import subprocess
 from pathlib import Path
+
+import win32com.client
+
+def SDAfstemning(orchestrator_connection=None):
+    SapGuiAuto = win32com.client.GetObject("SAPGUI")
+    application = SapGuiAuto.GetScriptingEngine
+    connection = application.Children(0)
+    session = connection.Children(0)
+
+    with sap_with_popup_guard():
+        session.findById("wnd[0]").maximize()
+        session.findById("wnd[0]/tbar[0]/okcd").text = "cji3"
+        session.findById("wnd[0]").sendVKey(0)
+
+        # Variant
+        session.findById("wnd[0]/tbar[1]/btn[17]").press()
+        session.findById("wnd[1]/usr/txtV-LOW").text = "SD Afstemning"
+        session.findById("wnd[1]/usr/txtENAME-LOW").text = ""
+        session.findById("wnd[1]/usr/txtENAME-LOW").setFocus()
+        session.findById("wnd[1]/usr/txtENAME-LOW").caretPosition = 0
+        session.findById("wnd[1]/tbar[0]/btn[8]").press()
+
+        # Kør rapport
+        session.findById("wnd[0]/tbar[1]/btn[8]").press()
+
+        # Snapshot af Excel-processer før eksport
+        excel_before = _pids()
+
+        # Eksport
+        session.findById("wnd[0]/tbar[1]/btn[43]").press()
+
+        # Gem fil i current working directory
+        session.findById("wnd[1]/usr/ctxtDY_PATH").text = os.getcwd()
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = "Opus data til afst.xlsx"
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len("Opus data til afst.xlsx")
+        session.findById("wnd[1]/tbar[0]/btn[11]").press()
+
+        # Luk tilbage
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[15]").press()
+        except Exception:
+            pass
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[15]").press()
+        except Exception:
+            pass
+
+    # Luk eventuelle nye Excel-processer
+    new_pids = close_new_excels(excel_before, wait_seconds=30)
+    print(f"Lukkede Excel PIDs: {sorted(new_pids)}")
+
+    # Luk ALT SAP
+    close_all_sap()
+
+def MTMIkkeGodkendteTimer(orchestrator_connection=None):
+    SapGuiAuto = win32com.client.GetObject("SAPGUI")
+    application = SapGuiAuto.GetScriptingEngine
+    connection = application.Children(0)
+    session = connection.Children(0)
+
+    with sap_with_popup_guard():
+        # Opret SAP-objekter (som i VBS)
+        SapGuiAuto = win32com.client.GetObject("SAPGUI")
+        application = SapGuiAuto.GetScriptingEngine
+        connection = application.Children(0)
+        session = connection.Children(0)
+
+        # Trin som i VBS
+        session.findById("wnd[0]").maximize()
+        session.findById("wnd[0]/tbar[0]/okcd").text = "/ncats_da"
+        session.findById("wnd[0]").sendVKey(0)
+
+        # Variant
+        session.findById("wnd[0]/tbar[1]/btn[17]").press()
+        session.findById("wnd[1]/usr/txtV-LOW").text = "ikke godk. MTM"
+        session.findById("wnd[1]/usr/txtV-LOW").caretPosition = len("ikke godk. MTM")
+        session.findById("wnd[1]/usr/txtENAME-LOW").text = ""
+        session.findById("wnd[1]/usr/txtENAME-LOW").caretPosition = 0
+        session.findById("wnd[1]/tbar[0]/btn[8]").press()
+
+        # Execute
+        session.findById("wnd[0]/tbar[1]/btn[8]").press()
+
+        # Hjælper: findes element?
+        def _exists(id_):
+            try:
+                session.findById(id_)
+                return True
+            except Exception:
+                return False
+
+        shell = session.findById("wnd[0]/usr/cntlCATS_DETAILS/shellcont/shell")
+
+        # 1) Ny recording-sti
+        try:
+            shell.pressToolbarButton("CX_TOOLBAR")
+            shell.pressToolbarButton("CX_TOOLBAR")
+            shell.pressToolbarContextButton("&MB_EXPORT")
+            shell.selectContextMenuItem("&XXL")
+        except Exception:
+            # 2) Gammel recording-sti (direkte export)
+            try:
+                shell.pressToolbarContextButton("&MB_EXPORT")
+                shell.selectContextMenuItem("&XXL")
+            except Exception:
+                # 3) Klassisk ALV context menu (virker tit)
+                shell.contextMenu()
+                shell.selectContextMenuItem("&XXL")
+        
+        # --- Hvis format-popup kommer (vælg XLSX) ---
+        try:
+            # Tjek om format-dialogen findes
+            session.findById("wnd[1]/usr/cmbG_LISTBOX")
+
+            # Vælg "Andre formater"
+            session.findById("wnd[1]/usr/radRB_OTHERS").select()
+
+            # Vælg XLSX (Office 2007+)
+            session.findById("wnd[1]/usr/cmbG_LISTBOX").Key = "10"
+
+            # OK
+            session.findById("wnd[1]/tbar[0]/btn[0]").press()
+
+        except Exception:
+            # Popup kom ikke – så gør vi ingenting
+            pass
+
+        # Vent på gem-dialogfelter (wnd[1])
+        deadline = time.time() + 10
+        while time.time() < deadline and not (
+            _exists("wnd[1]/usr/ctxtDY_PATH") and _exists("wnd[1]/usr/ctxtDY_FILENAME")
+        ):
+            time.sleep(0.1)
+
+        # Snapshot af Excel PIDs før evt. Excel åbner
+        excel_before = _pids()
+
+        # Gem i current working directory
+        session.findById("wnd[1]/usr/ctxtDY_PATH").text = os.getcwd()
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = "ikkegodkendtetimer.xlsx"
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len("ikkegodkendtetimer.xlsx")
+
+        # Enter
+        session.findById("wnd[1]").sendVKey(0)
+
+        # Tilbage/luk (to gange)
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[3]").press()
+        except Exception:
+            pass
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[3]").press()
+        except Exception:
+            pass
+
+    # Luk eventuelle NYE Excel-processer (åbner ofte forsinket)
+    new_pids = close_new_excels(excel_before, wait_seconds=30)
+    print(f"Lukkede Excel PIDs: {sorted(new_pids)}")
+
+    # Luk ALT SAP (alle sessions/forbindelser)
+    close_all_sap()
+
 def SDStamdataTabel(orchestrator_connection = None):
     SapGuiAuto = win32com.client.GetObject("SAPGUI")
     application = SapGuiAuto.GetScriptingEngine
@@ -277,10 +439,10 @@ def SDLonUdtrak(orchestrator_connection = None):
         shell.doubleClickNode("         23")
 
         today = datetime.today()
-        fifteen_days_ago = today - timedelta(days=15)
+        eight_days_ago = today - timedelta(days=8)
         date_format = lambda d: d.strftime("%d.%m.%Y")
 
-        session.findById("wnd[0]/usr/ctxt%%DYN001-LOW").text = date_format(fifteen_days_ago)
+        session.findById("wnd[0]/usr/ctxt%%DYN001-LOW").text = date_format(eight_days_ago)
         session.findById("wnd[0]/usr/ctxt%%DYN001-HIGH").text = date_format(today)
         session.findById("wnd[0]/usr/ctxt%%DYN001-HIGH").setFocus()
         session.findById("wnd[0]/usr/ctxt%%DYN001-HIGH").caretPosition = 10
@@ -349,7 +511,7 @@ def SDLonUdtrak(orchestrator_connection = None):
     # <-- UDENFOR sap_with_popup_guard(): nu rydder vi op, så watcher ikke hænger
 
     # Luk eventuelle NYE Excel-processer (åbner ofte forsinket)
-    new_pids = close_new_excels(excel_before, wait_seconds=30)
+    new_pids = close_new_excels(excel_before, wait_seconds=60)
     print(f"Lukkede Excel PIDs: {sorted(new_pids)}")
 
     # Luk ALT SAP (alle sessions/forbindelser)

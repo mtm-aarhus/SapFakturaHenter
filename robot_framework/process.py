@@ -18,15 +18,15 @@ import smtplib
 
 def process(orchestrator_connection: OrchestratorConnection) -> None:
     
-    def Email(Modtagermail, file_name, file_path):
+    def Email(Modtagermail, Bcc, file_name, file_path):
         SMTP_SERVER = "smtp.adm.aarhuskommune.dk"
         SMTP_PORT = 25
-        SCREENSHOT_SENDER = "aktbob@aarhus.dk"
         subject = "Indtastningsgrundlag i forhold til SD Løn"
 
         html = """
         <html>
         <body>
+            <p>Hej HR:) </p>
             <p>Hermed som aftalt indtastningsgrundlag i forhold til SD Løn.</p> 
         </body>
         </html>
@@ -55,6 +55,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
         msg["From"] = 'RPA_info@aarhus.dk'
         msg["Subject"] = subject
         msg["Cc"] = orchestrator_connection.get_constant('balas').value
+        msg["Bcc"] = Bcc
         msg.set_content("Please enable HTML to view this message.")
         msg.add_alternative(html, subtype="html")
 
@@ -188,31 +189,35 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
     Client = sharepoint_client( site_url= sharepoint_site_url)
 
     runs = [
-        # {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
+        {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
         {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
     ]
 
     for run in runs:
-        if run["RunName"] == "SD løn udtræk":
-            sap_running = initialize_sap(orchestrator_connection)
-            if not sap_running:
-                raise Exception("SAP failed to launch successfully")
-            else:
-                print("SAP is running and ready.")
-            watcher = start_popup_watcher(interval= 0.3)
-            try:
-                print("▶ Starter SD løn udtræk")
-                SDLonUdtrak(orchestrator_connection)
-                
-            finally:
-                watcher.stop()
-            Outfile, Name = InputToTemplate()
+        if run["RunName"] == "SD løn udtræk" and datetime.today().weekday() == 0:
+                sap_running = initialize_sap(orchestrator_connection)
+                if not sap_running:
+                    raise Exception("SAP failed to launch successfully")
+                else:
+                    print("SAP is running and ready.")
+                watcher = start_popup_watcher(interval= 0.3)
+                try:
+                    print("▶ Starter SD løn udtræk")
+                    SDLonUdtrak()
+                    
+                finally:
+                    watcher.stop()
+                Outfile, Name = InputToTemplate()
 
-            upload_to_sharepoint(Client, Outfile, parent_folder_url, site_url_str=sharepoint_site_url)
-            # Email(orchestrator_connection.get_constant('balas').value, file_name= Name, file_path= Outfile)
-            file_deleter(Outfile)
-            file_deleter('export.xlsx')
+                # upload_to_sharepoint(Client, Outfile, parent_folder_url, site_url_str=sharepoint_site_url) ##skal ikke aktiveres for nu
+                Mail = orchestrator_connection.get_constant('SapFakturaHenterHRMail').value
+                ModtagerMail = Mail.split(',')[0]
+                Bcc = Mail.split(',')[-1]
+                Email(ModtagerMail, Bcc, file_name= Name, file_path= Outfile)
+                file_deleter(Outfile)
+                file_deleter('export.xlsx')
+
 
         elif run["RunName"] == "SD Forfaldne faktura":
             sap_running = initialize_sap(orchestrator_connection)
