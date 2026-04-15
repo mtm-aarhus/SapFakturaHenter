@@ -189,7 +189,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
     Client = sharepoint_client( site_url= sharepoint_site_url)
 
     runs = [
-        # {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
+        {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
         {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
         {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
