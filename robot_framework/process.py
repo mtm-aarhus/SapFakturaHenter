@@ -10,7 +10,7 @@ from email.message import EmailMessage
 import smtplib
 import mimetypes
 from robot_framework.initialize_sap import initialize_sap
-from scripts import SDLonUdtrak, InputToTemplate, SDForfaldneFaktura, SDStamdataTabel
+from scripts import SDLonUdtrak, InputToTemplate, SDForfaldneFaktura, SDStamdataTabel, MTMIkkeGodkendteTimer, SDAfstemning
 from sap_popup_utils import start_popup_watcher
 import os, time, shutil, tempfile, mimetypes
 from email.message import EmailMessage
@@ -189,9 +189,11 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
     Client = sharepoint_client( site_url= sharepoint_site_url)
 
     runs = [
-        {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
+        # {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
+        {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
         {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
+        {"RunName": "SDAfstemning", "UploadMappe": "SP"},
     ]
 
     for run in runs:

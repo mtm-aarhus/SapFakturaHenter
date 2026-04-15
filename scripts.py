@@ -65,7 +65,7 @@ def SDAfstemning(orchestrator_connection=None):
 
     # Luk ALT SAP
     close_all_sap()
-
+    
 def MTMIkkeGodkendteTimer(orchestrator_connection=None):
     SapGuiAuto = win32com.client.GetObject("SAPGUI")
     application = SapGuiAuto.GetScriptingEngine
@@ -117,7 +117,6 @@ def MTMIkkeGodkendteTimer(orchestrator_connection=None):
                 shell.pressToolbarContextButton("&MB_EXPORT")
                 shell.selectContextMenuItem("&XXL")
             except Exception:
-                # 3) Klassisk ALV context menu (virker tit)
                 shell.contextMenu()
                 shell.selectContextMenuItem("&XXL")
         
@@ -137,6 +136,11 @@ def MTMIkkeGodkendteTimer(orchestrator_connection=None):
 
         except Exception:
             # Popup kom ikke – så gør vi ingenting
+            session.findById("wnd[1]/usr/cmbG_LISTBOX")
+            session.findById("wnd[1]/usr/radRB_OTHERS").select()
+            session.findById("wnd[1]/usr/cmbG_LISTBOX").Key = "10"
+            session.findById("wnd[1]/tbar[0]/btn[0]").press()
+        except Exception:
             pass
 
         # Vent på gem-dialogfelter (wnd[1])
@@ -173,7 +177,6 @@ def MTMIkkeGodkendteTimer(orchestrator_connection=None):
 
     # Luk ALT SAP (alle sessions/forbindelser)
     close_all_sap()
-
 def SDStamdataTabel(orchestrator_connection = None):
     SapGuiAuto = win32com.client.GetObject("SAPGUI")
     application = SapGuiAuto.GetScriptingEngine
