@@ -18,7 +18,7 @@ import smtplib
 
 def process(orchestrator_connection: OrchestratorConnection) -> None:
     
-    def Email(Modtagermail, Bcc, file_name, file_path):
+    def Email(Modtagermail, Bcc1, Bcc2, file_name, file_path):
         SMTP_SERVER = "smtp.adm.aarhuskommune.dk"
         SMTP_PORT = 25
         subject = "Indtastningsgrundlag i forhold til SD Løn"
@@ -55,7 +55,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
         msg["From"] = 'RPA_info@aarhus.dk'
         msg["Subject"] = subject
         msg["Cc"] = orchestrator_connection.get_constant('balas').value
-        msg["Bcc"] = Bcc
+        msg["Bcc"] = ", ".join(filter(None, [Bcc1, Bcc2]))
         msg.set_content("Please enable HTML to view this message.")
         msg.add_alternative(html, subtype="html")
 
@@ -215,8 +215,9 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 # upload_to_sharepoint(Client, Outfile, parent_folder_url, site_url_str=sharepoint_site_url) ##skal ikke aktiveres for nu
                 Mail = orchestrator_connection.get_constant('SapFakturaHenterHRMail').value
                 ModtagerMail = Mail.split(',')[0]
-                Bcc = Mail.split(',')[-1]
-                Email(ModtagerMail, Bcc, file_name= Name, file_path= Outfile)
+                Bcc1 = Mail.split(',')[-1]
+                Bcc2 = Mail.split(',')[1]
+                Email(ModtagerMail, Bcc1, Bcc2, file_name= Name, file_path= Outfile)
                 file_deleter(Outfile)
                 file_deleter('export.xlsx')
 
