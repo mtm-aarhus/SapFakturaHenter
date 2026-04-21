@@ -14,6 +14,8 @@ import subprocess
 from pathlib import Path
 
 import win32com.client
+from datetime import datetime, date
+from openpyxl.utils.datetime import from_excel, to_excel
 
 def SDAfstemning(orchestrator_connection=None):
     SapGuiAuto = win32com.client.GetObject("SAPGUI")
@@ -528,9 +530,10 @@ def InputToTemplate():
     Returnerer Path til den nye fil (eller None).
     """
     from pathlib import Path
-    from datetime import datetime
+    from datetime import datetime, date
     from openpyxl import load_workbook
     from openpyxl.utils.cell import range_boundaries, get_column_letter
+    from openpyxl.utils.datetime import from_excel
     import win32com.client as win32
     import win32com, importlib, shutil, os, time
     import win32process
@@ -538,14 +541,15 @@ def InputToTemplate():
     print("[InputToTemplate] Start")
 
     BASE = Path.cwd()
-    EXPORT    = BASE / "export.xlsx"
-    TEMPLATE  = BASE / "SDLoen, indtastningsskabelon.xlsx"
+    EXPORT = BASE / "export.xlsx"
+    TEMPLATE = BASE / "SDLoen, indtastningsskabelon.xlsx"
     NAME = f"{datetime.today().strftime('%d.%m.%Y')}SDLoen.xlsx"
-    OUTFILE   = BASE / NAME
-    READ_SHEET     = "Sheet1"
-    TARGET_SHEET   = "Sheet1"
+    OUTFILE = BASE / NAME
+    READ_SHEET = "Sheet1"
+    TARGET_SHEET = "Sheet1"
     REFRESH_SHEETS = ["Tabel1", "Antal linjer pr. navn"]
     START_ROW, START_COL = 2, 1  # A2
+    DATE_COL = 2  # Bogføringsdato = kolonne B i inputarket
 
     # ---------- helpers ----------
     def _get_excel_app():
@@ -574,7 +578,6 @@ def InputToTemplate():
 
     def _disable_background_refresh(wb):
         print("[Excel] Slår baggrundsrefresh fra på Connections/QueryTables/ListObjects")
-        # Connections
         try:
             for conn in wb.Connections:
                 try:
@@ -589,7 +592,7 @@ def InputToTemplate():
                     pass
         except Exception:
             pass
-        # QueryTables / ListObjects
+
         try:
             for ws in wb.Worksheets:
                 try:
@@ -618,7 +621,7 @@ def InputToTemplate():
         t0 = time.time()
         while time.time() - t0 < timeout:
             busy = False
-            # Connections
+
             try:
                 for conn in wb.Connections:
                     try:
@@ -629,7 +632,7 @@ def InputToTemplate():
                         pass
             except Exception:
                 pass
-            # QueryTables
+
             if not busy:
                 try:
                     for ws in wb.Worksheets:
@@ -638,28 +641,35 @@ def InputToTemplate():
                                 try:
                                     qt = lo.QueryTable
                                     if qt and qt.Refreshing:
-                                        busy = True; break
+                                        busy = True
+                                        break
                                 except Exception:
                                     pass
-                            if busy: break
+                            if busy:
+                                break
                         except Exception:
                             pass
                         try:
                             for qt in ws.QueryTables:
                                 try:
                                     if qt.Refreshing:
-                                        busy = True; break
+                                        busy = True
+                                        break
                                 except Exception:
                                     pass
-                            if busy: break
+                            if busy:
+                                break
                         except Exception:
                             pass
                 except Exception:
                     pass
+
             if not busy:
                 print("[Excel] Refresh er færdig.")
                 return True
+
             time.sleep(0.5)
+
         print("[Excel] Refresh timeout – fortsætter.")
         return False
 
@@ -672,7 +682,6 @@ def InputToTemplate():
                 pass
 
     def _last_used_from(ws, min_row=2, min_col=1):
-        # hurtig afgrænsning af dataområde fra og med (min_row, min_col)
         dim = ws.calculate_dimension()  # fx 'A1:F1234'
         min_c, min_r, max_c, max_r = range_boundaries(dim)
         sr, sc = max(min_row, min_r), max(min_col, min_c)
@@ -680,9 +689,17 @@ def InputToTemplate():
         last_col = sc - 1
         if max_r < sr or max_c < sc:
             return last_row, last_col
-        for r_idx, row in enumerate(ws.iter_rows(min_row=sr, max_row=max_r,
-                                                min_col=sc, max_col=max_c,
-                                                values_only=True), start=sr):
+
+        for r_idx, row in enumerate(
+            ws.iter_rows(
+                min_row=sr,
+                max_row=max_r,
+                min_col=sc,
+                max_col=max_c,
+                values_only=True
+            ),
+            start=sr
+        ):
             row_last_col = None
             for j in range(len(row) - 1, -1, -1):
                 v = row[j]
@@ -694,6 +711,55 @@ def InputToTemplate():
                 if row_last_col > last_col:
                     last_col = row_last_col
         return last_row, last_col
+
+    def _date_sort_key(v):
+        """
+        Bruges kun til sortering.
+        Ændrer IKKE den oprindelige celleværdi.
+        """
+        if v in (None, ""):
+            return datetime.max
+
+        if isinstance(v, datetime):
+            return v
+
+        if isinstance(v, date):
+            return datetime.combine(v, datetime.min.time())
+
+        if isinstance(v, (int, float)):
+            try:
+                return from_excel(v)
+            except Exception:
+                return datetime.max
+
+        if isinstance(v, str):
+            s = v.strip()
+            for fmt in (
+                "%d.%m.%Y",
+                "%d-%m-%Y",
+                "%Y-%m-%d",
+                "%d/%m/%Y",
+                "%d.%m.%Y %H:%M:%S",
+                "%d-%m-%Y %H:%M:%S",
+                "%Y-%m-%d %H:%M:%S",
+                "%d/%m/%Y %H:%M:%S",
+            ):
+                try:
+                    return datetime.strptime(s, fmt)
+                except ValueError:
+                    pass
+
+        return datetime.max
+
+    def _strip_time(v):
+        """
+        Returnér datoer som Excel-serienummer for at undgå COM/tidszone-forskydning.
+        """
+        if isinstance(v, datetime):
+            return int(to_excel(datetime(v.year, v.month, v.day)))
+        if isinstance(v, date):
+            return int(to_excel(datetime(v.year, v.month, v.day)))
+        return v
 
     # ---------- 1) læs data hurtigt fra export.xlsx ----------
     print(f"[Read] Åbner {EXPORT}")
@@ -707,12 +773,26 @@ def InputToTemplate():
     print(f"[Read] Sidste brugte område fra A2: last_row={last_row}, last_col={last_col}")
 
     if last_row >= START_ROW and last_col >= START_COL:
-        data_rows = list(ws_src.iter_rows(min_row=START_ROW, max_row=last_row,
-                                          min_col=START_COL, max_col=last_col,
-                                          values_only=True))
+        data_rows = list(
+            ws_src.iter_rows(
+                min_row=START_ROW,
+                max_row=last_row,
+                min_col=START_COL,
+                max_col=last_col,
+                values_only=True
+            )
+        )
+
+        # Bevar de oprindelige værdier
         data_rows = [tuple("" if v is None else v for v in row) for row in data_rows]
+
+        # Sortér kun på en afledt nøgle, ikke ved at ændre celleværdierne
+        data_rows.sort(
+            key=lambda row: _date_sort_key(row[DATE_COL - 1]) if len(row) >= DATE_COL else datetime.max
+        )
     else:
         data_rows = []
+
     wb_src.close()
 
     if not data_rows:
@@ -741,22 +821,25 @@ def InputToTemplate():
     print(f"[Excel] PID={pid}")
 
     prev_calc = None
+    wb = None
+
     try:
         print(f"[Excel] Åbner OUTFILE: {OUTFILE}")
         wb = xl.Workbooks.Open(Filename=str(OUTFILE))
 
-        # performance (best effort) EFTER åbning
         try:
             prev_calc = xl.Calculation
             print(f"[Excel] Current CalcMode={prev_calc}")
         except Exception:
             pass
+
         for attr, val in (("ScreenUpdating", False), ("EnableEvents", False)):
             try:
                 setattr(xl, attr, val)
                 print(f"[Excel] {attr}={val}")
             except Exception:
                 pass
+
         try:
             xl.Calculation = -4135  # xlCalculationManual
             print("[Excel] Calculation=Manual")
@@ -772,22 +855,35 @@ def InputToTemplate():
             raise RuntimeError(f"Fanen '{TARGET_SHEET}' findes ikke. Tilgængelige: {names}")
 
         start_col_letter = get_column_letter(START_COL)
-        end_col_letter   = get_column_letter(START_COL + cols - 1)
-        end_row          = START_ROW + rows - 1
+        end_col_letter = get_column_letter(START_COL + cols - 1)
+        end_row = START_ROW + rows - 1
         rng_addr = f"{start_col_letter}{START_ROW}:{end_col_letter}{end_row}"
         print(f"[Write] Range={rng_addr}")
 
         max_cols = max(len(r) for r in data_rows)
         if max_cols != cols:
             cols = max_cols
-        data_rect = tuple(tuple("" if i >= len(r) or r[i] is None else r[i] for i in range(cols))
-                          for r in data_rows)
 
+        data_rect = tuple(
+            tuple(
+                "" if i >= len(r) or r[i] is None else _strip_time(r[i])
+                for i in range(cols)
+            )
+            for r in data_rows
+        )
+
+        # Samme som originalen: skriv rå værdier direkte, men uden klokkeslæt på datetime
         ws.Range(rng_addr).Value2 = data_rect
+        date_col_excel = START_COL + DATE_COL - 1
+        date_range = ws.Range(
+            ws.Cells(START_ROW, date_col_excel),
+            ws.Cells(end_row, date_col_excel)
+        )
+        date_range.NumberFormat = "dd.mm.yyyy"
         wb.Save()
         print("[Write] Data skrevet og gemt")
 
-        # slå baggrundsrefresh fra og refresh de relevante faner
+        # Samme refresh-flow som originalen
         _disable_background_refresh(wb)
 
         def refresh_sheet(name):
@@ -808,38 +904,65 @@ def InputToTemplate():
         for sheet_name in REFRESH_SHEETS:
             refresh_sheet(sheet_name)
 
+        # Sortér pivottabeller på Bogføringsdato stigende
+        print("[Pivot] Sorterer Bogføringsdato")
+        try:
+            for ws in wb.Worksheets:
+                try:
+                    pivot_tables = ws.PivotTables()
+                except Exception:
+                    continue
+
+                try:
+                    pivot_count = pivot_tables.Count
+                except Exception:
+                    continue
+
+                for i in range(1, pivot_count + 1):
+                    try:
+                        pt = pivot_tables.Item(i)
+                        pf = pt.PivotFields("Bogføringsdato")
+                        pf.AutoSort(1, "Bogføringsdato")  # 1 = stigende
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[Pivot] Sortering fejlede: {e}")
+
+        wb.Save()
         wb.Close(SaveChanges=True)
         print("[Excel] Workbook lukket")
 
     except Exception as e:
         print(f"[Excel] Fejl: {e}")
         try:
-            wb.Close(SaveChanges=False)
+            if wb is not None:
+                wb.Close(SaveChanges=False)
         except Exception:
             pass
         raise
+
     finally:
-        # gendan og quit
         try:
             if prev_calc is not None:
                 xl.Calculation = prev_calc
                 print(f"[Excel] Gendanner CalcMode={prev_calc}")
         except Exception:
             pass
+
         for attr, val in (("EnableEvents", True), ("ScreenUpdating", True)):
             try:
                 setattr(xl, attr, val)
             except Exception:
                 pass
+
         try:
             xl.Quit()
             print("[Excel] Quit() kaldt")
         except Exception:
             print("[Excel] Quit() fejlede")
 
-        # sikkerhedsnet – kill hvis Excel stadig hænger
         _kill_pid(pid)
-        time.sleep(0.5)  # giv OS/OneDrive tid til at slippe låse
+        time.sleep(0.5)
 
     print(f"[Done] Skrev {rows} x {cols} til {OUTFILE}")
     return OUTFILE, NAME

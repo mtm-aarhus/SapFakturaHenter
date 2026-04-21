@@ -248,9 +248,9 @@ for run in runs:
         Outfile, Name = InputToTemplate()
 
         # upload_to_sharepoint(Client, Outfile, parent_folder_url, site_url_str=sharepoint_site_url) ##skal ikke aktiveres for nu
-        Email(orchestrator_connection.get_constant('balas').value, file_name= Name, file_path= Outfile)
-        file_deleter(Outfile)
-        file_deleter('export.xlsx')
+        # Email(orchestrator_connection.get_constant('balas').value, file_name= Name, file_path= Outfile)
+        # file_deleter(Outfile)
+        # file_deleter('export.xlsx')
 
     elif run["RunName"] == "SD Forfaldne faktura":
         sap_running = initialize_sap(orchestrator_connection)

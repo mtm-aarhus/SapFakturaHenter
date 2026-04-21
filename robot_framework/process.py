@@ -261,5 +261,4 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
             upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
             file_deleter(filepath)
-        else:
-            break
+
