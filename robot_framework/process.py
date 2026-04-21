@@ -261,4 +261,43 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
             upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
             file_deleter(filepath)
+        elif run["RunName"] == "SDAfstemning":
+            sap_running = initialize_sap(orchestrator_connection)
+            if not sap_running:
+                raise Exception("SAP failed to launch successfully")
+            else:
+                print("SAP is running and ready.")
+            watcher = start_popup_watcher(interval= 0.3)
+            try:
+                print("▶ Starter SD afstemning")
+                SDAfstemning()
 
+            finally:
+                watcher.stop()
+
+            cwd = os.getcwd()
+            filepath = os.path.join(cwd, "Opus data til afst.xlsx")
+            upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+            file_deleter(filepath)
+
+        elif run["RunName"] == "MTMIkkeGodkendteTimer":
+            sap_running = initialize_sap(orchestrator_connection)
+            if not sap_running:
+                raise Exception("SAP failed to launch successfully")
+            else:
+                print("SAP is running and ready.")
+            watcher = start_popup_watcher(interval= 0.3)
+            try:
+                print("▶ Starter SD løn udtræk")
+                MTMIkkeGodkendteTimer()
+                
+            finally:
+                watcher.stop()
+    
+            cwd = os.getcwd()
+            os.rename("ikkegodkendtetimer.XLSX", "MTMIkkeGodkendteTimer.xlsx")
+            filepath = os.path.join(cwd, "MTMIkkeGodkendteTimer.xlsx")
+            
+    
+            upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+            file_deleter(filepath)
