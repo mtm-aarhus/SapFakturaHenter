@@ -12,6 +12,7 @@ from robot_framework import reset
 from robot_framework.exceptions import BusinessError, handle_error, log_exception
 from robot_framework import process
 from robot_framework import config
+from scripts import close_all_sap
 
 
 def main():
@@ -37,6 +38,7 @@ def main():
         # We actually want to catch all exceptions possible here.
         # pylint: disable-next = broad-exception-caught
         except Exception as error:
+            close_all_sap()
             error_count += 1
             handle_error(f"Process Error #{error_count}", error, None, orchestrator_connection)
 
@@ -45,4 +47,5 @@ def main():
     reset.kill_all(orchestrator_connection)
 
     if config.FAIL_ROBOT_ON_TOO_MANY_ERRORS and error_count == config.MAX_RETRY_COUNT:
+        close_all_sap()
         raise RuntimeError("Process failed too many times.")
