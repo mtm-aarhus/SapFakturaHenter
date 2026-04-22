@@ -198,6 +198,36 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
     for run in runs:
         if run["RunName"] == "SD løn udtræk" and datetime.today().weekday() == 0:
+                try:
+                    sap_running = initialize_sap(orchestrator_connection)
+                    if not sap_running:
+                        raise Exception("SAP failed to launch successfully")
+                    else:
+                        print("SAP is running and ready.")
+                    watcher = start_popup_watcher(interval= 0.3)
+                    try:
+                        print("▶ Starter SD løn udtræk")
+                        SDLonUdtrak()
+                        
+                    finally:
+                        watcher.stop()
+                    Outfile, Name = InputToTemplate()
+
+                    # upload_to_sharepoint(Client, Outfile, parent_folder_url, site_url_str=sharepoint_site_url) ##skal ikke aktiveres for nu
+                    Mail = orchestrator_connection.get_constant('SapFakturaHenterHRMail').value
+                    ModtagerMail = Mail.split(',')[0]
+                    Bcc1 = Mail.split(',')[-1]
+                    Bcc2 = Mail.split(',')[1]
+                    Email(ModtagerMail, Bcc1, Bcc2, file_name= Name, file_path= Outfile)
+                    file_deleter(Outfile)
+                    file_deleter('export.xlsx')
+                except:
+                    orchestrator_connection.log_error('SD løn udtræk fejlede - genkør!!')
+                    continue
+
+
+        elif run["RunName"] == "SD Forfaldne faktura":
+            try:
                 sap_running = initialize_sap(orchestrator_connection)
                 if not sap_running:
                     raise Exception("SAP failed to launch successfully")
@@ -206,98 +236,89 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 watcher = start_popup_watcher(interval= 0.3)
                 try:
                     print("▶ Starter SD løn udtræk")
-                    SDLonUdtrak()
+                    SDForfaldneFaktura(orchestrator_connection)
                     
                 finally:
                     watcher.stop()
-                Outfile, Name = InputToTemplate()
 
-                # upload_to_sharepoint(Client, Outfile, parent_folder_url, site_url_str=sharepoint_site_url) ##skal ikke aktiveres for nu
-                Mail = orchestrator_connection.get_constant('SapFakturaHenterHRMail').value
-                ModtagerMail = Mail.split(',')[0]
-                Bcc1 = Mail.split(',')[-1]
-                Bcc2 = Mail.split(',')[1]
-                Email(ModtagerMail, Bcc1, Bcc2, file_name= Name, file_path= Outfile)
-                file_deleter(Outfile)
-                file_deleter('export.xlsx')
+                cwd = os.getcwd()
+                filepath = os.path.join(cwd, "Forfaldne fakturaer MTM.XLSX")
 
-
-        elif run["RunName"] == "SD Forfaldne faktura":
-            sap_running = initialize_sap(orchestrator_connection)
-            if not sap_running:
-                raise Exception("SAP failed to launch successfully")
-            else:
-                print("SAP is running and ready.")
-            watcher = start_popup_watcher(interval= 0.3)
-            try:
-                print("▶ Starter SD løn udtræk")
-                SDForfaldneFaktura(orchestrator_connection)
-                
-            finally:
-                watcher.stop()
-
-            cwd = os.getcwd()
-            filepath = os.path.join(cwd, "Forfaldne fakturaer MTM.XLSX")
-
-            upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
-            file_deleter(filepath)
+                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+                file_deleter(filepath)
+            except:
+                orchestrator_connection.log_error('SD forfaldne faktura fejlede ')
+                continue
 
         elif run["RunName"] == "SD Stamdatatabel":
-            sap_running = initialize_sap(orchestrator_connection)
-            if not sap_running:
-                raise Exception("SAP failed to launch successfully")
-            else:
-                print("SAP is running and ready.")
-            watcher = start_popup_watcher(interval= 0.3)
             try:
-                print("▶ Starter SD løn udtræk")
-                SDStamdataTabel(orchestrator_connection)
-                
-            finally:
-                watcher.stop()
+                sap_running = initialize_sap(orchestrator_connection)
+                if not sap_running:
+                    raise Exception("SAP failed to launch successfully")
+                else:
+                    print("SAP is running and ready.")
+                watcher = start_popup_watcher(interval= 0.3)
+                try:
+                    print("▶ Starter SD løn udtræk")
+                    SDStamdataTabel(orchestrator_connection)
+                    
+                finally:
+                    watcher.stop()
 
-            cwd = os.getcwd()
-            filepath = os.path.join(cwd, "Stamdatatabel.XLSX")
+                cwd = os.getcwd()
+                filepath = os.path.join(cwd, "Stamdatatabel.XLSX")
 
-            upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
-            file_deleter(filepath)
+                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+                file_deleter(filepath)
+            except:
+                orchestrator_connection.log_error('SD stamdata fejlede ')
+                continue
         elif run["RunName"] == "SDAfstemning":
-            sap_running = initialize_sap(orchestrator_connection)
-            if not sap_running:
-                raise Exception("SAP failed to launch successfully")
-            else:
-                print("SAP is running and ready.")
-            watcher = start_popup_watcher(interval= 0.3)
             try:
-                print("▶ Starter SD afstemning")
-                SDAfstemning()
+                sap_running = initialize_sap(orchestrator_connection)
+                if not sap_running:
+                    raise Exception("SAP failed to launch successfully")
+                else:
+                    print("SAP is running and ready.")
+                watcher = start_popup_watcher(interval= 0.3)
+                try:
+                    print("▶ Starter SD afstemning")
+                    SDAfstemning()
 
-            finally:
-                watcher.stop()
+                finally:
+                    watcher.stop()
 
-            cwd = os.getcwd()
-            filepath = os.path.join(cwd, "Opus data til afst.xlsx")
-            upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
-            file_deleter(filepath)
+                cwd = os.getcwd()
+                filepath = os.path.join(cwd, "Opus data til afst.xlsx")
+                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+                file_deleter(filepath)
+            except:
+                orchestrator_connection.log_error('SD afstemning fejlede ')
+                continue
 
         elif run["RunName"] == "MTMIkkeGodkendteTimer":
-            sap_running = initialize_sap(orchestrator_connection)
-            if not sap_running:
-                raise Exception("SAP failed to launch successfully")
-            else:
-                print("SAP is running and ready.")
-            watcher = start_popup_watcher(interval= 0.3)
             try:
-                print("▶ Starter SD løn udtræk")
-                MTMIkkeGodkendteTimer()
+                sap_running = initialize_sap(orchestrator_connection)
+                if not sap_running:
+                    raise Exception("SAP failed to launch successfully")
+                else:
+                    print("SAP is running and ready.")
+                watcher = start_popup_watcher(interval= 0.3)
+                try:
+                    print("▶ Starter SD løn udtræk")
+                    MTMIkkeGodkendteTimer()
+                    
+                finally:
+                    watcher.stop()
+        
+                cwd = os.getcwd()
+                os.rename("ikkegodkendtetimer.XLSX", "MTMIkkeGodkendteTimer.xlsx")
+                filepath = os.path.join(cwd, "MTMIkkeGodkendteTimer.xlsx")
                 
-            finally:
-                watcher.stop()
-    
-            cwd = os.getcwd()
-            os.rename("ikkegodkendtetimer.XLSX", "MTMIkkeGodkendteTimer.xlsx")
-            filepath = os.path.join(cwd, "MTMIkkeGodkendteTimer.xlsx")
+        
+                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+                file_deleter(filepath)
+            except:
+                orchestrator_connection.log_error('MTM ikke godkendte timer fejlede ')
+                continue
             
-    
-            upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
-            file_deleter(filepath)
