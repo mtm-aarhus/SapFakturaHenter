@@ -54,7 +54,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
         msg["To"] = Modtagermail
         msg["From"] = 'RPA_info@aarhus.dk'
         msg["Subject"] = subject
-        msg["Cc"] = orchestrator_connection.get_constant('balas').value
+        msg["Cc"] = orchestrator_connection.get_constant('Error Email').value
         msg["Bcc"] = ", ".join(filter(None, [Bcc1, Bcc2]))
         msg.set_content("Please enable HTML to view this message.")
         msg.add_alternative(html, subtype="html")
