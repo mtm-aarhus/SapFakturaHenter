@@ -10,7 +10,7 @@ from email.message import EmailMessage
 import smtplib
 import mimetypes
 from robot_framework.initialize_sap import initialize_sap
-from scripts import SDLonUdtrak, InputToTemplate, SDForfaldneFaktura, SDStamdataTabel, MTMIkkeGodkendteTimer, SDAfstemning
+from scripts import *
 from sap_popup_utils import start_popup_watcher
 import os, time, shutil, tempfile, mimetypes
 from email.message import EmailMessage
@@ -190,7 +190,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
     runs = [
         {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
-        # {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
+        {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
         {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
         {"RunName": "SDAfstemning", "UploadMappe": "SP"},
@@ -198,32 +198,33 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
     for run in runs:
         if run["RunName"] == "SD løn udtræk" and datetime.today().weekday() == 0:
+            try:
+                sap_running = initialize_sap(orchestrator_connection)
+                if not sap_running:
+                    raise Exception("SAP failed to launch successfully")
+                else:
+                    print("SAP is running and ready.")
+                watcher = start_popup_watcher(interval= 0.3)
                 try:
-                    sap_running = initialize_sap(orchestrator_connection)
-                    if not sap_running:
-                        raise Exception("SAP failed to launch successfully")
-                    else:
-                        print("SAP is running and ready.")
-                    watcher = start_popup_watcher(interval= 0.3)
-                    try:
-                        print("▶ Starter SD løn udtræk")
-                        SDLonUdtrak()
-                        
-                    finally:
-                        watcher.stop()
-                    Outfile, Name = InputToTemplate()
+                    print("▶ Starter SD løn udtræk")
+                    SDLonUdtrak()
+                    
+                finally:
+                    watcher.stop()
+                Outfile, Name = InputToTemplate()
 
-                    # upload_to_sharepoint(Client, Outfile, parent_folder_url, site_url_str=sharepoint_site_url) ##skal ikke aktiveres for nu
-                    Mail = orchestrator_connection.get_constant('SapFakturaHenterHRMail').value
-                    ModtagerMail = Mail.split(',')[0]
-                    Bcc1 = Mail.split(',')[-1]
-                    Bcc2 = Mail.split(',')[1]
-                    Email(ModtagerMail, Bcc1, Bcc2, file_name= Name, file_path= Outfile)
-                    file_deleter(Outfile)
-                    file_deleter('export.xlsx')
-                except:
-                    orchestrator_connection.log_error('SD løn udtræk fejlede - genkør!!')
-                    continue
+                # upload_to_sharepoint(Client, Outfile, parent_folder_url, site_url_str=sharepoint_site_url) ##skal ikke aktiveres for nu
+                Mail = orchestrator_connection.get_constant('SapFakturaHenterHRMail').value
+                ModtagerMail = Mail.split(',')[0]
+                Bcc1 = Mail.split(',')[-1]
+                Bcc2 = Mail.split(',')[1]
+                Email(ModtagerMail, Bcc1, Bcc2, file_name= Name, file_path= Outfile)
+                file_deleter(Outfile)
+                file_deleter('export.xlsx')
+            except Exception as e:
+                close_all_sap()
+                orchestrator_connection.log_error(f'SD løn udtræk fejlede {e} - genkør!!')
+                continue
 
 
         elif run["RunName"] == "SD Forfaldne faktura":
@@ -246,8 +247,9 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
                 upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
                 file_deleter(filepath)
-            except:
-                orchestrator_connection.log_error('SD forfaldne faktura fejlede ')
+            except Exception as e:
+                close_all_sap()
+                orchestrator_connection.log_error(f'SD forfaldne faktura fejlede {e} ')
                 continue
 
         elif run["RunName"] == "SD Stamdatatabel":
@@ -270,8 +272,9 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
                 upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
                 file_deleter(filepath)
-            except:
-                orchestrator_connection.log_error('SD stamdata fejlede ')
+            except Exception as e:
+                close_all_sap()
+                orchestrator_connection.log_error(f'SD stamdata fejlede {e} ')
                 continue
         elif run["RunName"] == "SDAfstemning":
             try:
@@ -292,8 +295,9 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 filepath = os.path.join(cwd, "Opus data til afst.xlsx")
                 upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
                 file_deleter(filepath)
-            except:
-                orchestrator_connection.log_error('SD afstemning fejlede ')
+            except Exception as e:
+                close_all_sap()
+                orchestrator_connection.log_error(f'SD afstemning fejlede {e}')
                 continue
 
         elif run["RunName"] == "MTMIkkeGodkendteTimer":
@@ -318,7 +322,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
         
                 upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
                 file_deleter(filepath)
-            except:
-                orchestrator_connection.log_error('MTM ikke godkendte timer fejlede ')
+            except Exception as e:
+                close_all_sap()
+                orchestrator_connection.log_error(f'MTM ikke godkendte timer fejlede {e}')
                 continue
-            

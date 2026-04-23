@@ -104,7 +104,6 @@ def MTMIkkeGodkendteTimer(orchestrator_connection=None):
                 return True
             except Exception:
                 return False
-
         shell = session.findById("wnd[0]/usr/cntlCATS_DETAILS/shellcont/shell")
 
         # 1) Ny recording-sti
@@ -124,29 +123,20 @@ def MTMIkkeGodkendteTimer(orchestrator_connection=None):
         
         # --- Hvis format-popup kommer (vælg XLSX) ---
         try:
-            # Tjek om format-dialogen findes
-            session.findById("wnd[1]/usr/cmbG_LISTBOX")
-
-            # Vælg "Andre formater"
-            session.findById("wnd[1]/usr/radRB_OTHERS").select()
-
-            # Vælg XLSX (Office 2007+)
-            session.findById("wnd[1]/usr/cmbG_LISTBOX").Key = "10"
-
-            # OK
-            session.findById("wnd[1]/tbar[0]/btn[0]").press()
-
-        except Exception:
-            # Popup kom ikke – så gør vi ingenting
             session.findById("wnd[1]/usr/cmbG_LISTBOX")
             session.findById("wnd[1]/usr/radRB_OTHERS").select()
             session.findById("wnd[1]/usr/cmbG_LISTBOX").Key = "10"
             session.findById("wnd[1]/tbar[0]/btn[0]").press()
         except Exception:
-            pass
+            try:
+                session.findById("wnd[1]/usr/radRB_OTHERS").select()
+                session.findById("wnd[1]/usr/cmbG_LISTBOX").Key = "10"
+                session.findById("wnd[1]/tbar[0]/btn[0]").press()
+            except Exception:
+                pass  # Popup kom ikke – fortsæt
 
         # Vent på gem-dialogfelter (wnd[1])
-        deadline = time.time() + 10
+        deadline = time.time() + 30
         while time.time() < deadline and not (
             _exists("wnd[1]/usr/ctxtDY_PATH") and _exists("wnd[1]/usr/ctxtDY_FILENAME")
         ):
