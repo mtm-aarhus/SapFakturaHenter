@@ -10,11 +10,12 @@ from email.message import EmailMessage
 import smtplib
 import mimetypes
 from robot_framework.initialize_sap import initialize_sap
-from scripts import SDLonUdtrak, InputToTemplate, SDForfaldneFaktura, SDStamdataTabel, MTMIkkeGodkendteTimer, SDAfstemning
+from scripts import SDLonUdtrak, InputToTemplate, SDForfaldneFaktura, SDStamdataTabel, MTMIkkeGodkendteTimer, SDAfstemning, KE5x
 from sap_popup_utils import start_popup_watcher
 import os, time, shutil, tempfile, mimetypes
 from email.message import EmailMessage
 import smtplib
+from robot_framework.process import process
 
 
 
@@ -24,3 +25,5 @@ orchestrator_connection = OrchestratorConnection(
     os.getenv('OpenOrchestratorSQL'),
     os.getenv('OpenOrchestratorKey'),
     None)
+
+process(orchestrator_connection= orchestrator_connection)

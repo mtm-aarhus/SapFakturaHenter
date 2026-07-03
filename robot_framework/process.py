@@ -194,6 +194,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
         {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
         {"RunName": "SDAfstemning", "UploadMappe": "SP"},
+        {"RunName": "KEX5", "UploadMappe": "SP"},
     ]
 
     for run in runs:
@@ -224,6 +225,34 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
             except Exception as e:
                 close_all_sap()
                 orchestrator_connection.log_error(f'SD løn udtræk fejlede {e} - genkør!!')
+                continue
+
+        elif run["RunName"] == "KEX5" and datetime.today().weekday() == 2:
+            try:
+                sap_running = initialize_sap(orchestrator_connection)
+                if not sap_running:
+                    raise Exception("SAP failed to launch successfully")
+                else:
+                    print("SAP is running and ready.")
+                watcher = start_popup_watcher(interval= 0.3)
+                try:
+                    print("▶ Starter KEX5")
+                    KE5x(orchestrator_connection)
+                    
+                finally:
+                    watcher.stop()
+
+                cwd = os.getcwd()
+                filepath = os.path.join(cwd, "KE5x.XLSX")
+
+                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+                file_deleter(filepath)
+                
+
+                
+            except Exception as e:
+                close_all_sap()
+                orchestrator_connection.log_error(f'KEX5 {e} ')
                 continue
 
 

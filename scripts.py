@@ -17,6 +17,54 @@ import win32com.client
 from datetime import datetime, date
 from openpyxl.utils.datetime import from_excel, to_excel
 
+def KE5x(orchestrator_connection=None):
+    SapGuiAuto = win32com.client.GetObject("SAPGUI")
+    application = SapGuiAuto.GetScriptingEngine
+    connection = application.Children(0)
+    session = connection.Children(0)
+
+    with sap_with_popup_guard():
+        session.findById("wnd[0]").maximize()
+        session.findById("wnd[0]/tbar[0]/okcd").text = "ke5x"
+        session.findById("wnd[0]").sendVKey(0)
+
+        # Profitcentergruppe
+        session.findById("wnd[0]/usr/ctxtGD_PCGRP").text = "256"
+        session.findById("wnd[0]/usr/ctxtGD_PCGRP").setFocus()
+        session.findById("wnd[0]/usr/ctxtGD_PCGRP").caretPosition = 3
+
+        # Kør rapport (btn[8] to gange, som i det optagede script)
+        session.findById("wnd[0]/tbar[1]/btn[8]").press()
+
+        # Snapshot af Excel-processer før eksport
+        excel_before = _pids()
+
+        # Eksport via menu (Liste -> Eksporter -> Regneark)
+        session.findById("wnd[0]/mbar/menu[0]/menu[3]/menu[1]").select()
+
+        # Gem fil i current working directory
+        session.findById("wnd[1]/usr/ctxtDY_PATH").text = os.getcwd()
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = "KE5x.xlsx"
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len("KE5x.xlsx")
+        session.findById("wnd[1]/tbar[0]/btn[11]").press()
+
+        # Luk tilbage
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[15]").press()
+        except Exception:
+            pass
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[15]").press()
+        except Exception:
+            pass
+
+    # Luk eventuelle nye Excel-processer
+    new_pids = close_new_excels(excel_before, wait_seconds=30)
+    print(f"Lukkede Excel PIDs: {sorted(new_pids)}")
+
+    # Luk ALT SAP
+    close_all_sap()
+    
 def SDAfstemning(orchestrator_connection=None):
     SapGuiAuto = win32com.client.GetObject("SAPGUI")
     application = SapGuiAuto.GetScriptingEngine

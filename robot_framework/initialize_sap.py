@@ -111,7 +111,7 @@ def initialize_sap(orchestrator_connection):
     # Chrome setup
     chrome_options = Options()
     chrome_options.add_argument('--remote-debugging-pipe')
-    # chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_experimental_option("prefs", {
         "download.default_directory": downloads_folder,
