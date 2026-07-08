@@ -227,7 +227,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 orchestrator_connection.log_error(f'SD løn udtræk fejlede {e} - genkør!!')
                 continue
 
-        elif run["RunName"] == "KEX5" and datetime.today().weekday() == 2:
+        elif run["RunName"] == "KEX5":
             try:
                 sap_running = initialize_sap(orchestrator_connection)
                 if not sap_running:
