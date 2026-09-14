@@ -15,6 +15,8 @@ from sap_popup_utils import start_popup_watcher
 import os, time, shutil, tempfile, mimetypes
 from email.message import EmailMessage
 import smtplib
+from openpyxl import load_workbook, Workbook
+import pyodbc
 
 def process(orchestrator_connection: OrchestratorConnection) -> None:
     
@@ -191,6 +193,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
     runs = [
         {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
         {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
+        {"RunName": "ZPSA_Brugerparametre", "UploadMappe": "SP"}
         {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
         {"RunName": "SDAfstemning", "UploadMappe": "SP"},
@@ -228,33 +231,79 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 continue
 
         elif run["RunName"] == "KEX5":
+            cwd = os.getcwd()
+            combined_path = os.path.join(cwd, "KE5x_samlet.xlsx")
+
+            ke5x_runs = [
+                {"title": "title2.xlsx",  "dst": os.path.join(cwd, "KE5x_2.xlsx")},
+                {"title": "title82.xlsx", "dst": os.path.join(cwd, "KE5x_82.xlsx")},
+            ]
+
+            def _resolve_ke5x_output(base, title):
+                # KE5x gemmer uden fast endelse; prøv de mest sandsynlige varianter
+                for cand in (f"{title}.XLSX", f"{title}.xlsx", title):
+                    p = os.path.join(base, cand)
+                    if os.path.exists(p):
+                        return p
+                raise FileNotFoundError(
+                    f"Kunne ikke finde KE5x-output for '{title}' i {base} "
+                    f"(prøvede {title}.XLSX / .xlsx / uden endelse)"
+                )
+
+            saved_files = []
             try:
-                sap_running = initialize_sap(orchestrator_connection)
-                if not sap_running:
-                    raise Exception("SAP failed to launch successfully")
-                else:
+                for r in ke5x_runs:
+                    sap_running = initialize_sap(orchestrator_connection)
+                    if not sap_running:
+                        raise Exception("SAP failed to launch successfully")
                     print("SAP is running and ready.")
-                watcher = start_popup_watcher(interval= 0.3)
-                try:
-                    print("▶ Starter KEX5")
-                    KE5x(orchestrator_connection)
-                    
-                finally:
-                    watcher.stop()
 
-                cwd = os.getcwd()
-                filepath = os.path.join(cwd, "KE5x.XLSX")
+                    watcher = start_popup_watcher(interval=0.3)
+                    try:
+                        print(f"▶ Starter KE5x ({r['title']})")
+                        KE5x(orchestrator_connection, r["title"])
+                    finally:
+                        watcher.stop()
 
-                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
-                file_deleter(filepath)
-                
+                    # KE5x kalder selv close_all_sap(), så SAP er lukket her.
+                    # Flyt output væk med det samme under et entydigt navn.
+                    produced = _resolve_ke5x_output(cwd, r["title"])
+                    if os.path.exists(r["dst"]):
+                        os.remove(r["dst"])
+                    os.rename(produced, r["dst"])
+                    saved_files.append(r["dst"])
 
-                
+                # Stabl de to rapporter til én tabel (behold kun header fra første fil)
+                combined_wb = Workbook()
+                combined_ws = combined_wb.active
+                combined_ws.title = "KE5x"
+                for i, f in enumerate(saved_files):
+                    wb = load_workbook(f, read_only=True, data_only=True)
+                    ws = wb.active
+                    min_row = 1 if i == 0 else 2
+                    for row in ws.iter_rows(min_row=min_row, values_only=True):
+                        combined_ws.append(row)
+                    wb.close()
+
+                combined_wb.save(combined_path)
+                print(f"✅ Samlet {len(saved_files)} rapporter til "
+                    f"{os.path.basename(combined_path)} ({combined_ws.max_row} rækker inkl. header)")
+
+                upload_to_sharepoint(Client, combined_path, parent_folder_url, site_url_str=sharepoint_site_url)
+                for f in saved_files:
+                    file_deleter(f)
+                file_deleter(combined_path)
+
             except Exception as e:
                 close_all_sap()
+                for f in saved_files + [combined_path]:
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except OSError:
+                        pass
                 orchestrator_connection.log_error(f'KEX5 {e} ')
                 continue
-
 
         elif run["RunName"] == "SD Forfaldne faktura":
             try:
@@ -336,22 +385,133 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                     raise Exception("SAP failed to launch successfully")
                 else:
                     print("SAP is running and ready.")
-                watcher = start_popup_watcher(interval= 0.3)
+                watcher = start_popup_watcher(interval=0.3)
                 try:
-                    print("▶ Starter SD løn udtræk")
+                    print("▶ Starter MTM ikke godkendte timer")
                     MTMIkkeGodkendteTimer()
-                    
                 finally:
                     watcher.stop()
         
                 cwd = os.getcwd()
                 os.rename("ikkegodkendtetimer.XLSX", "MTMIkkeGodkendteTimer.xlsx")
                 filepath = os.path.join(cwd, "MTMIkkeGodkendteTimer.xlsx")
-                
         
+                # # Nærmeste leder (Opus + ORG ligger på samme server -> én forbindelse)
+                # sql_server_f = orchestrator_connection.get_constant("sqlserverf").value
+                # conn_string_f = f"DRIVER={{SQL Server}};SERVER={sql_server_f};DATABASE=FDW;Trusted_Connection=yes;"
+                # conn_f = pyodbc.connect(conn_string_f)
+                # try:
+                #     resultat = timerPerLeder(conn_f)
+                # finally:
+                #     conn_f.close()
+        
+                # # resultat er nu en DataFrame med leder + summerede timer
+                # print(resultat)
                 upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
                 file_deleter(filepath)
             except Exception as e:
                 close_all_sap()
                 orchestrator_connection.log_error(f'MTM ikke godkendte timer fejlede {e}')
                 continue
+
+        elif run["RunName"] == "ZPSA_Brugerparametre":
+            try:
+                sap_running = initialize_sap(orchestrator_connection)
+                if not sap_running:
+                    raise Exception("SAP failed to launch successfully")
+                else:
+                    print("SAP is running and ready.")
+                watcher = start_popup_watcher(interval=0.3)
+                try:
+                    print("▶ Starter ZPSA_Brugerparametre")
+                    ZPSA_Brugerparametre()
+                finally:
+                    watcher.stop()
+            
+                cwd = os.getcwd()
+                filepath_xlsx = os.path.join(cwd, "Opusbrugere.xlsx")
+                filepath_html = os.path.join(cwd, "Opusbrugere.html")
+                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+                file_deleter(filepath_xlsx)
+                file_deleter(filepath_html)
+
+                # file_deleter(filepath)
+            except Exception as e:
+                close_all_sap()
+                orchestrator_connection.log_error(f'ZPSA_Brugerparametre fejlede {e}')
+                continue
+
+def timerPerLeder(conn_org):
+    # 1. Excel-data
+    df = pd.read_excel("MTMIkkeGodkendteTimer.xlsx")
+    df = df.rename(columns={
+        "Medarbejdernummer": "medarbejder_id",
+        "Antal (måleenhed)": "ikke_reg_timer",
+    })
+
+    # Konverter timer til tal (fanger tekst-tal som '5,0' eller ' 5 ')
+    df["ikke_reg_timer_raw"] = df["ikke_reg_timer"]
+    df["ikke_reg_timer"] = pd.to_numeric(df["ikke_reg_timer"], errors="coerce")
+    total_excel = df["ikke_reg_timer"].sum()
+
+    # 2. Oversæt medarbejdernummer -> az (Ident) i Opus-db
+    medarbejdere = df["medarbejder_id"].dropna().unique().tolist()
+    placeholders = ",".join("?" * len(medarbejdere))
+    query_az = f"""
+        SELECT MedarbejderNummer AS medarbejder_id,
+               Ident             AS az
+        FROM [Opus].[brugerstyring].[BRS_Rolletildeling-Hist]
+        WHERE MedarbejderNummer IN ({placeholders})
+    """
+    az_map = pd.read_sql(query_az, conn_org, params=medarbejdere)
+
+    # Behold kun én az pr. medarbejdernummer
+    az_map = az_map.drop_duplicates(subset="medarbejder_id", keep="first")
+
+    df = df.merge(az_map, on="medarbejder_id", how="left")
+
+    # 3. Hent leder-info for alle az'er i ORG-db
+    azer = df["az"].dropna().unique().tolist()
+    placeholders = ",".join("?" * len(azer))
+    query_leder = f"""
+        SELECT BrugerNavn                AS az,
+               FungerendeLederBrugernavn AS leder_brugernavn,
+               FungerendeLederKaldenavn  AS leder_kaldenavn,
+               FungerendeLederEmail      AS leder_email
+        FROM [ORG].[adm].[Bruger_AD_PrimærKonto_Aktuel]
+        WHERE BrugerNavn IN ({placeholders})
+    """
+    ledere = pd.read_sql(query_leder, conn_org, params=azer)
+
+    # Behold kun én lederrække pr. az
+    ledere = ledere.drop_duplicates(subset="az", keep="first")
+    df = df.merge(ledere, on="az", how="left")
+
+        # 4. Sum ikke-reg. timer pr. leder
+    resultat = (
+        df.groupby(
+            ["leder_brugernavn", "leder_kaldenavn", "leder_email"],
+            dropna=False,
+        )["ikke_reg_timer"]
+        .sum()
+        .reset_index()
+        .sort_values("ikke_reg_timer", ascending=False)
+    )
+
+    diff = resultat["ikke_reg_timer"].sum() - total_excel
+    if abs(diff) > 0.01:
+        print(f"⚠  DIFFERENCE: {diff}  (resultat matcher IKKE Excel-total!)")
+    else:
+        print("✅ Total matcher Excel-total")
+
+    # Skriv resultat til CSV (dansk Excel: semikolon-separator, komma-decimal)
+    csv_path = os.path.join(os.getcwd(), "TimerPerLeder.csv")
+    resultat.to_csv(
+        csv_path,
+        sep=";",
+        decimal=",",
+        index=False,
+        encoding="utf-8-sig",   # -sig sikrer at æ/ø/å vises rigtigt i Excel
+    )
+
+    return resultat

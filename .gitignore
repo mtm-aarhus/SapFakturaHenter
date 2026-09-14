@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+#Files
+TimerPerLeder.csv
+MTMIkkeGodkendteTimer.xlsx
 # Distribution / packaging
 .Python
 build/

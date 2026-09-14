@@ -17,7 +17,7 @@ import win32com.client
 from datetime import datetime, date
 from openpyxl.utils.datetime import from_excel, to_excel
 
-def KE5x(orchestrator_connection=None):
+def KE5x(orchestrator_connection=None, excel_title = 'title'):
     SapGuiAuto = win32com.client.GetObject("SAPGUI")
     application = SapGuiAuto.GetScriptingEngine
     connection = application.Children(0)
@@ -29,7 +29,10 @@ def KE5x(orchestrator_connection=None):
         session.findById("wnd[0]").sendVKey(0)
 
         # Profitcentergruppe
-        session.findById("wnd[0]/usr/ctxtGD_PCGRP").text = "256"
+        if excel_title == "title82.xlsx":
+            session.findById("wnd[0]/usr/ctxtGD_PCGRP").text = "82"
+        if excel_title == "title2.xlsx":
+            session.findById("wnd[0]/usr/ctxtGD_PCGRP").text = "2"
         session.findById("wnd[0]/usr/ctxtGD_PCGRP").setFocus()
         session.findById("wnd[0]/usr/ctxtGD_PCGRP").caretPosition = 3
 
@@ -44,8 +47,8 @@ def KE5x(orchestrator_connection=None):
 
         # Gem fil i current working directory
         session.findById("wnd[1]/usr/ctxtDY_PATH").text = os.getcwd()
-        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = "KE5x.xlsx"
-        session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len("KE5x.xlsx")
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = str(excel_title)
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len(excel_title)
         session.findById("wnd[1]/tbar[0]/btn[11]").press()
 
         # Luk tilbage
@@ -1004,3 +1007,101 @@ def InputToTemplate():
 
     print(f"[Done] Skrev {rows} x {cols} til {OUTFILE}")
     return OUTFILE, NAME
+
+def ZPSA_Brugerparametre(orchestrator_connection=None, excel_title='Opusbrugere.html'):
+    SapGuiAuto = win32com.client.GetObject("SAPGUI")
+    application = SapGuiAuto.GetScriptingEngine
+    connection = application.Children(0)
+    session = connection.Children(0)
+
+    with sap_with_popup_guard():
+        session.findById("wnd[0]").maximize()
+        session.findById("wnd[0]/tbar[0]/okcd").text = "ZPSA_BRUGERPARAMETRE"
+        session.findById("wnd[0]").sendVKey(0)
+
+        # Kør rapport
+        session.findById("wnd[0]/tbar[1]/btn[8]").press()
+
+        # Eksporter (btn[45])
+        session.findById("wnd[0]/tbar[1]/btn[45]").press()
+
+        # Vælg HTML-format i popup (indeks 3)
+        session.findById("wnd[1]/usr/subSUBSCREEN_STEPLOOP:SAPLSPO5:0150/sub:SAPLSPO5:0150/radSPOPLI-SELFLAG[3,0]").select()
+        session.findById("wnd[1]/usr/subSUBSCREEN_STEPLOOP:SAPLSPO5:0150/sub:SAPLSPO5:0150/radSPOPLI-SELFLAG[3,0]").setFocus()
+        session.findById("wnd[1]/tbar[0]/btn[0]").press()
+
+        # Snapshot af Excel-processer før eksport
+        excel_before = _pids()
+
+        # Gem txt i current working directory
+        session.findById("wnd[1]/usr/ctxtDY_PATH").text = os.getcwd()
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").text = str(excel_title)
+        session.findById("wnd[1]/usr/ctxtDY_FILENAME").caretPosition = len(excel_title)
+        session.findById("wnd[1]/tbar[0]/btn[11]").press()
+
+        # Luk tilbage
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[15]").press()
+        except Exception:
+            pass
+        try:
+            session.findById("wnd[0]/tbar[0]/btn[15]").press()
+        except Exception:
+            pass
+
+    # Luk eventuelle nye Excel-processer
+    new_pids = close_new_excels(excel_before, wait_seconds=30)
+    print(f"Lukkede Excel PIDs: {sorted(new_pids)}")
+
+    # Luk ALT SAP
+    close_all_sap()
+
+    # Konverter html -> xlsx med korrekte kolonnetitler
+    html_path = os.path.join(os.getcwd(), str(excel_title))
+    xlsx_path = os.path.splitext(html_path)[0] + ".xlsx"
+    _sap_html_til_xlsx(html_path, xlsx_path)
+    print(f"Gemte Excel: {xlsx_path}")
+    return xlsx_path
+
+def _sap_html_til_xlsx(html_path, xlsx_path):
+    from bs4 import BeautifulSoup
+    from openpyxl import Workbook
+
+    # SAP's HTML-eksport er typisk cp1252/latin-1
+    raw = None
+    for enc in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            with open(html_path, "r", encoding=enc) as f:
+                raw = f.read()
+            break
+        except UnicodeDecodeError:
+            continue
+    if raw is None:
+        with open(html_path, "r", encoding="latin-1") as f:
+            raw = f.read()
+
+    soup = BeautifulSoup(raw, "html.parser")
+    table = soup.find("table")
+    if table is None:
+        raise ValueError(f"Ingen <table> fundet i {html_path}")
+
+    rows = []
+    for tr in table.find_all("tr"):
+        celler = tr.find_all(["td", "th"])
+        if not celler:
+            continue
+        # SAP bruger &nbsp; som fyld — strip det væk
+        værdier = [c.get_text().replace("\xa0", " ").strip() for c in celler]
+        # Spring helt tomme rækker over (separatorlinjer)
+        if any(v for v in værdier):
+            rows.append(værdier)
+
+    if not rows:
+        raise ValueError(f"Ingen datarækker fundet i {html_path}")
+
+    wb = Workbook()
+    ws = wb.active
+    for row in rows:
+        ws.append(row)
+    wb.save(xlsx_path)
+    return xlsx_path
