@@ -200,8 +200,8 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
     runs = [
         # {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
-        {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
-        # {"RunName": "ZPSA_Brugerparametre", "UploadMappe": "SP"}
+        # {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
+        {"RunName": "ZPSA_Brugerparametre", "UploadMappe": "SP"},
         # {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         # {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
         # {"RunName": "SDAfstemning", "UploadMappe": "SP"},
@@ -436,9 +436,12 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                     watcher.stop()
             
                 cwd = os.getcwd()
-                filepath = os.path.join(cwd, "Opusbrugere.txt")
+                filepath = os.path.join(cwd, "Opusbrugere.xlsx")
+                filepath_html = os.path.join(cwd, "Opusbrugere.html")
+                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
 
-                # file_deleter(filepath)
+                file_deleter(filepath)
+                file_deleter(filepath_html)
             except Exception as e:
                 close_all_sap()
                 orchestrator_connection.log_error(f'ZPSA_Brugerparametre fejlede {e}')
@@ -684,6 +687,3 @@ def timerPerLeder(conn_org):
     return resultat
 
 process(orchestrator_connection= orchestrator_connection)
-
-
-
