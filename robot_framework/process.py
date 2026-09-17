@@ -431,7 +431,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 cwd = os.getcwd()
                 filepath_xlsx = os.path.join(cwd, "Opusbrugere.xlsx")
                 filepath_html = os.path.join(cwd, "Opusbrugere.html")
-                upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+                upload_to_sharepoint(Client, filepath_xlsx, parent_folder_url, site_url_str=sharepoint_site_url)
                 file_deleter(filepath_xlsx)
                 file_deleter(filepath_html)
 
