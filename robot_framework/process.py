@@ -17,6 +17,8 @@ from email.message import EmailMessage
 import smtplib
 from openpyxl import load_workbook, Workbook
 import pyodbc
+import pandas as pd
+from reminder_beskeder import laeg_i_koe
 
 def process(orchestrator_connection: OrchestratorConnection) -> None:
     
@@ -379,6 +381,8 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 continue
 
         elif run["RunName"] == "MTMIkkeGodkendteTimer":
+            cwd = os.getcwd()
+            filepath = os.path.join(cwd, "MTMIkkeGodkendteTimer.xlsx")
             try:
                 sap_running = initialize_sap(orchestrator_connection)
                 if not sap_running:
@@ -391,28 +395,32 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                     MTMIkkeGodkendteTimer()
                 finally:
                     watcher.stop()
-        
-                cwd = os.getcwd()
-                os.rename("ikkegodkendtetimer.XLSX", "MTMIkkeGodkendteTimer.xlsx")
-                filepath = os.path.join(cwd, "MTMIkkeGodkendteTimer.xlsx")
-        
-                # # Nærmeste leder (Opus + ORG ligger på samme server -> én forbindelse)
-                # sql_server_f = orchestrator_connection.get_constant("sqlserverf").value
-                # conn_string_f = f"DRIVER={{SQL Server}};SERVER={sql_server_f};DATABASE=FDW;Trusted_Connection=yes;"
-                # conn_f = pyodbc.connect(conn_string_f)
-                # try:
-                #     resultat = timerPerLeder(conn_f)
-                # finally:
-                #     conn_f.close()
-        
-                # # resultat er nu en DataFrame med leder + summerede timer
-                # print(resultat)
+
+                os.replace("ikkegodkendtetimer.XLSX", filepath)
                 upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
-                file_deleter(filepath)
+
+                if datetime.today().weekday() == 2:
+                    try:
+                        print("▶ Lægger reminders i kø (onsdag)")
+                        sql_server_f = orchestrator_connection.get_constant("sqlserverf").value
+                        conn_string_f = f"DRIVER={{SQL Server}};SERVER={sql_server_f};DATABASE=FDW;Trusted_Connection=yes;"
+                        conn_f = pyodbc.connect(conn_string_f)
+                        try:
+                            resultat = timerPerLeder(conn_f)
+                        finally:
+                            conn_f.close()
+
+                        laeg_i_koe(orchestrator_connection, resultat, "LederTimerReminder")
+                    except Exception as e:
+                        orchestrator_connection.log_error(f'MTM reminders fejlede {e}')
+
             except Exception as e:
                 close_all_sap()
                 orchestrator_connection.log_error(f'MTM ikke godkendte timer fejlede {e}')
-                continue
+
+            finally:
+                if os.path.exists(filepath):
+                    file_deleter(filepath)
 
         elif run["RunName"] == "ZPSA_Brugerparametre":
             try:
@@ -441,6 +449,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 orchestrator_connection.log_error(f'ZPSA_Brugerparametre fejlede {e}')
                 continue
 
+
 def timerPerLeder(conn_org):
     # 1. Excel-data
     df = pd.read_excel("MTMIkkeGodkendteTimer.xlsx")
@@ -460,7 +469,7 @@ def timerPerLeder(conn_org):
     query_az = f"""
         SELECT MedarbejderNummer AS medarbejder_id,
                Ident             AS az
-        FROM [Opus].[brugerstyring].[BRS_Rolletildeling-Hist]
+        FROM [Opus].[brugerstyring].[BRS_Rolletildeling]
         WHERE MedarbejderNummer IN ({placeholders})
     """
     az_map = pd.read_sql(query_az, conn_org, params=medarbejdere)
@@ -470,24 +479,94 @@ def timerPerLeder(conn_org):
 
     df = df.merge(az_map, on="medarbejder_id", how="left")
 
-    # 3. Hent leder-info for alle az'er i ORG-db
+    # Ens skrivemåde af az (SQL er ligeglad med store/små bogstaver, pandas er ikke)
+    df["az"] = df["az"].str.strip().str.lower()
+
+    # 3. Hent personaleleder for alle az'er (ORG) og lederens mail (FDW)
     azer = df["az"].dropna().unique().tolist()
     placeholders = ",".join("?" * len(azer))
     query_leder = f"""
-        SELECT BrugerNavn                AS az,
-               FungerendeLederBrugernavn AS leder_brugernavn,
-               FungerendeLederKaldenavn  AS leder_kaldenavn,
-               FungerendeLederEmail      AS leder_email
-        FROM [ORG].[adm].[Bruger_AD_PrimærKonto_Aktuel]
-        WHERE BrugerNavn IN ({placeholders})
+        SELECT p.BrugerNavn              AS az,
+               p.FungPersLederBrugerNavn AS leder_brugernavn,
+               p.FungPersLederKaldeNavn  AS leder_kaldenavn,
+               p.LederSelv               AS leder_selv,
+               m.Email                   AS leder_email
+        FROM [ORG].[adm].[Bruger_Personaleleder] p
+        OUTER APPLY (
+            SELECT TOP 1 pl.Email
+            FROM [FDW].[pdb].[PersonLight_udvidet] pl
+            WHERE pl.Azident = p.FungPersLederBrugerNavn
+              AND pl.Email IS NOT NULL
+            ORDER BY pl.Loadtime DESC
+        ) m
+        WHERE p.BrugerNavn IN ({placeholders})
     """
     ledere = pd.read_sql(query_leder, conn_org, params=azer)
+    ledere["az"] = ledere["az"].str.strip().str.lower()
 
-    # Behold kun én lederrække pr. az
+    # Advar hvis en medarbejder har flere personaleledere, og behold én
+    flere = ledere[ledere.duplicated("az", keep=False)]
+    if not flere.empty:
+        print(f"⚠  {flere['az'].nunique()} az'er har mere end én personaleleder")
     ledere = ledere.drop_duplicates(subset="az", keep="first")
-    df = df.merge(ledere, on="az", how="left")
+    ledere["i_personaleleder"] = True
 
-        # 4. Sum ikke-reg. timer pr. leder
+    df = df.merge(ledere, on="az", how="left")
+    df["i_personaleleder"] = df["i_personaleleder"].eq(True)
+
+    # Find årsagen, når en medarbejder mangler leder eller ledermail
+    def find_mangel(row):
+        if pd.isna(row["az"]):
+            return "1. Ingen az (medarbejdernummer ikke fundet i Opus)"
+        if not row["i_personaleleder"]:
+            return "2. az findes ikke i Bruger_Personaleleder"
+        if pd.isna(row["leder_brugernavn"]):
+            return "3. Står i Bruger_Personaleleder, men uden leder"
+        if pd.isna(row["leder_email"]):
+            return "4. Leder fundet, men ingen mail i PersonLight_udvidet"
+        return None
+
+    df["mangel"] = df.apply(find_mangel, axis=1)
+    mangler = df[df["mangel"].notna()]
+
+    if mangler.empty:
+        print("✅ Alle medarbejdere har en leder med mail")
+    else:
+        print(
+            f"\n⚠  {mangler['medarbejder_id'].nunique()} medarbejdere mangler "
+            f"leder eller ledermail ({mangler['ikke_reg_timer'].sum():.2f} timer)\n"
+        )
+        for mangel, gruppe in mangler.groupby("mangel"):
+            pr_medarb = (
+                gruppe.groupby(
+                    ["medarbejder_id", "az", "leder_selv", "leder_brugernavn"],
+                    dropna=False,
+                )["ikke_reg_timer"]
+                .sum()
+                .reset_index()
+                .sort_values("ikke_reg_timer", ascending=False)
+            )
+            print(
+                f"--- {mangel}: {len(pr_medarb)} medarbejdere, "
+                f"{pr_medarb['ikke_reg_timer'].sum():.2f} timer"
+            )
+            print(pr_medarb.to_string(index=False))
+            print()
+
+        # # Gem listen, så den kan sendes videre eller undersøges i Excel
+        # mangler_path = os.path.join(os.getcwd(), "ManglerLeder.csv")
+        # (
+        #     mangler.groupby(
+        #         ["mangel", "medarbejder_id", "az", "leder_selv", "leder_brugernavn"],
+        #         dropna=False,
+        #     )["ikke_reg_timer"]
+        #     .sum()
+        #     .reset_index()
+        #     .to_csv(mangler_path, sep=";", decimal=",", index=False, encoding="utf-8-sig")
+        # )
+        # print(f"Liste over manglende ledere gemt i {mangler_path}")
+
+    # 4. Sum ikke-reg. timer pr. leder
     resultat = (
         df.groupby(
             ["leder_brugernavn", "leder_kaldenavn", "leder_email"],
@@ -505,13 +584,13 @@ def timerPerLeder(conn_org):
         print("✅ Total matcher Excel-total")
 
     # Skriv resultat til CSV (dansk Excel: semikolon-separator, komma-decimal)
-    csv_path = os.path.join(os.getcwd(), "TimerPerLeder.csv")
-    resultat.to_csv(
-        csv_path,
-        sep=";",
-        decimal=",",
-        index=False,
-        encoding="utf-8-sig",   # -sig sikrer at æ/ø/å vises rigtigt i Excel
-    )
+    # csv_path = os.path.join(os.getcwd(), "TimerPerLeder.csv")
+    # resultat.to_csv(
+    #     csv_path,
+    #     sep=";",
+    #     decimal=",",
+    #     index=False,
+    #     encoding="utf-8-sig",   # -sig sikrer at æ/ø/å vises rigtigt i Excel
+    # )
 
     return resultat

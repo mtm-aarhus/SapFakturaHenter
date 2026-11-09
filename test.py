@@ -18,13 +18,14 @@ import smtplib
 from openpyxl import load_workbook, Workbook
 import pyodbc
 import pandas as pd
-
+from reminder_beskeder import laeg_i_koe
 # Opsæt connection til Orchestrator
 orchestrator_connection = OrchestratorConnection(
     "SapProcess",
     os.getenv('OpenOrchestratorSQL'),
     os.getenv('OpenOrchestratorKey'),
     None)
+
 
 def process(orchestrator_connection: OrchestratorConnection) -> None:
     
@@ -200,8 +201,8 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
     runs = [
         # {"RunName": 'SD løn udtræk', "UploadMappe": "SP"},
-        # {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
-        {"RunName": "ZPSA_Brugerparametre", "UploadMappe": "SP"},
+        {"RunName": "MTMIkkeGodkendteTimer", "UploadMappe": "SP"},
+        # {"RunName": "ZPSA_Brugerparametre", "UploadMappe": "SP"},
         # {"RunName": "SD Forfaldne faktura", "UploadMappe": "SP"},
         # {"RunName": "SD Stamdatatabel", "UploadMappe": "SP"},
         # {"RunName": "SDAfstemning", "UploadMappe": "SP"},
@@ -387,39 +388,46 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 continue
 
         elif run["RunName"] == "MTMIkkeGodkendteTimer":
-            try:
-                # sap_running = initialize_sap(orchestrator_connection)
-                # if not sap_running:
-                #     raise Exception("SAP failed to launch successfully")
-                # else:
-                #     print("SAP is running and ready.")
-                # watcher = start_popup_watcher(interval=0.3)
-                # try:
-                #     print("▶ Starter MTM ikke godkendte timer")
-                #     MTMIkkeGodkendteTimer()
-                # finally:
-                #     watcher.stop()
-
                 cwd = os.getcwd()
-                # os.rename("ikkegodkendtetimer.XLSX", "MTMIkkeGodkendteTimer.xlsx")
                 filepath = os.path.join(cwd, "MTMIkkeGodkendteTimer.xlsx")
-
-                # Nærmeste leder (Opus + ORG ligger på samme server -> én forbindelse)
-                sql_server_f = orchestrator_connection.get_constant("sqlserverf").value
-                conn_string_f = f"DRIVER={{SQL Server}};SERVER={sql_server_f};DATABASE=FDW;Trusted_Connection=yes;"
-                conn_f = pyodbc.connect(conn_string_f)
                 try:
-                    resultat = timerPerLeder(conn_f)
+                    sap_running = initialize_sap(orchestrator_connection)
+                    if not sap_running:
+                        raise Exception("SAP failed to launch successfully")
+                    else:
+                        print("SAP is running and ready.")
+                    watcher = start_popup_watcher(interval=0.3)
+                    try:
+                        print("▶ Starter MTM ikke godkendte timer")
+                        MTMIkkeGodkendteTimer()
+                    finally:
+                        watcher.stop()
+    
+                    os.replace("ikkegodkendtetimer.XLSX", filepath)
+                    upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
+    
+                    if datetime.today().weekday() == 0:
+                        try:
+                            print("▶ Lægger reminders i kø (onsdag)")
+                            sql_server_f = orchestrator_connection.get_constant("sqlserverf").value
+                            conn_string_f = f"DRIVER={{SQL Server}};SERVER={sql_server_f};DATABASE=FDW;Trusted_Connection=yes;"
+                            conn_f = pyodbc.connect(conn_string_f)
+                            try:
+                                resultat = timerPerLeder(conn_f)
+                            finally:
+                                conn_f.close()
+    
+                            laeg_i_koe(orchestrator_connection, resultat, "LederTimerReminder")
+                        except Exception as e:
+                            orchestrator_connection.log_error(f'MTM reminders fejlede {e}')
+    
+                except Exception as e:
+                    close_all_sap()
+                    orchestrator_connection.log_error(f'MTM ikke godkendte timer fejlede {e}')
+    
                 finally:
-                    conn_f.close()
-
-                # resultat er nu en DataFrame med leder + summerede timer
-                print(resultat)
-                # file_deleter(filepath)
-            except Exception as e:
-                close_all_sap()
-                orchestrator_connection.log_error(f'MTM ikke godkendte timer fejlede {e}')
-                continue
+                    if os.path.exists(filepath):
+                        file_deleter(filepath)
 
         elif run["RunName"] == "ZPSA_Brugerparametre":
             try:
@@ -436,34 +444,21 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                     watcher.stop()
             
                 cwd = os.getcwd()
-                filepath = os.path.join(cwd, "Opusbrugere.xlsx")
+                filepath_xlsx = os.path.join(cwd, "Opusbrugere.xlsx")
                 filepath_html = os.path.join(cwd, "Opusbrugere.html")
                 upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
-
-                file_deleter(filepath)
+                file_deleter(filepath_xlsx)
                 file_deleter(filepath_html)
+
+                # file_deleter(filepath)
             except Exception as e:
                 close_all_sap()
                 orchestrator_connection.log_error(f'ZPSA_Brugerparametre fejlede {e}')
                 continue
 
-import unicodedata
+
 
 def timerPerLeder(conn_org):
-    print("=" * 60)
-    print("TIMER PER LEDER - DIAGNOSTIK")
-    print("=" * 60)
-
-    # --- DEBUG: sæt medarbejdernummer + az ind for at spore én medarbejder ---
-    NR = None        # fx 3318  (medarbejdernummer, int)
-    AZ = None        # fx "aztstn2"  (az i lowercase - matcher efter casefold)
-
-    # Normaliser tekst så ø/encoding, whitespace og case ikke bryder sammenligning
-    def _norm(s):
-        if pd.isna(s):
-            return ""
-        return unicodedata.normalize("NFC", str(s)).strip().casefold()
-
     # 1. Excel-data
     df = pd.read_excel("MTMIkkeGodkendteTimer.xlsx")
     df = df.rename(columns={
@@ -471,26 +466,13 @@ def timerPerLeder(conn_org):
         "Antal (måleenhed)": "ikke_reg_timer",
     })
 
-    # Fjern rækker UDEN medarbejder_id (sum-/subtotalrække nederst i arket)
-    før = len(df)
-    df = df[df["medarbejder_id"].notna()].copy()
-    df = df[df["medarbejder_id"].astype(str).str.strip() != ""].copy()
-    if før - len(df):
-        print(f"⚠  Fjernede {før - len(df)} række(r) uden medarbejder_id (sum-/tomme rækker)")
-
-    # Excel læser medarbejder_id som float (3853.0) pga. tomme celler -> match fejler.
-    # Normaliser til heltal (nullable Int64) i BEGGE sider af merget.
-    df["medarbejder_id"] = pd.to_numeric(df["medarbejder_id"], errors="coerce").astype("Int64")
+    # Konverter timer til tal (fanger tekst-tal som '5,0' eller ' 5 ')
+    df["ikke_reg_timer_raw"] = df["ikke_reg_timer"]
     df["ikke_reg_timer"] = pd.to_numeric(df["ikke_reg_timer"], errors="coerce")
     total_excel = df["ikke_reg_timer"].sum()
 
-    print("\n--- 1. EXCEL ---")
-    print(f"Rækker efter filtrering:   {len(df)}")
-    print(f"Unikke medarbejdere:       {df['medarbejder_id'].nunique()}")
-    print(f"TIMER I ALT (rå Excel):    {total_excel}")
-
-    # 2. Oversæt medarbejdernummer -> az (Ident) i Opus-db  (BEHOLD ALLE az)
-    medarbejdere = [int(x) for x in df["medarbejder_id"].dropna().unique()]
+    # 2. Oversæt medarbejdernummer -> az (Ident) i Opus-db
+    medarbejdere = df["medarbejder_id"].dropna().unique().tolist()
     placeholders = ",".join("?" * len(medarbejdere))
     query_az = f"""
         SELECT MedarbejderNummer AS medarbejder_id,
@@ -499,190 +481,125 @@ def timerPerLeder(conn_org):
         WHERE MedarbejderNummer IN ({placeholders})
     """
     az_map = pd.read_sql(query_az, conn_org, params=medarbejdere)
-    az_map = az_map.drop_duplicates()   # fjern kun identiske gentagelser
-    az_map["medarbejder_id"] = pd.to_numeric(az_map["medarbejder_id"], errors="coerce").astype("Int64")
-    # Casefold az: Opus giver lowercase, ORG-viewet uppercase -> ellers matcher join ikke
-    az_map["az"] = az_map["az"].astype(str).str.strip().str.casefold()
 
-    print("\n--- 2. AZ-OPSLAG (Opus) ---")
-    print(f"Rækker efter drop_duplicates: {len(az_map)}")
-    print(f"Unikke medarbejdere:          {az_map['medarbejder_id'].nunique()}")
-    print(f"Unikke az:                    {az_map['az'].nunique()}")
+    # Behold kun én az pr. medarbejdernummer
+    az_map = az_map.drop_duplicates(subset="medarbejder_id", keep="first")
 
-    # DEBUG A: er NR + az kommet med i az_map?
-    if NR is not None:
-        print(f"A. NR i az_map:   {(az_map['medarbejder_id'] == NR).any()}")
-        print(f"   az i az_map:   {az_map.loc[az_map['medarbejder_id'] == NR, 'az'].tolist()}")
+    df = df.merge(az_map, on="medarbejder_id", how="left")
 
-    # 3. Hent leder-info + Niveau2 UDEN at filtrere i SQL
-    #    (TM-filtrering sker i pandas -> undgår ø/encoding-mismatch mod databasen)
-    azer = az_map["az"].dropna().unique().tolist()
-    # BrugerNavn i basen er uppercase; send uppercase-varianter som parametre (robust mod case-sensitiv collation)
-    azer_db = [a.upper() for a in azer]
-    placeholders = ",".join("?" * len(azer_db))
+    # Ens skrivemåde af az (SQL er ligeglad med store/små bogstaver, pandas er ikke)
+    df["az"] = df["az"].str.strip().str.lower()
+
+    # 3. Hent personaleleder for alle az'er (ORG) og lederens mail (FDW)
+    azer = df["az"].dropna().unique().tolist()
+    placeholders = ",".join("?" * len(azer))
     query_leder = f"""
-        SELECT BrugerNavn                AS az,
-               Niveau2_OrgNavn           AS niveau2,
-               FungerendeLederBrugernavn AS leder_brugernavn,
-               FungerendeLederKaldenavn  AS leder_kaldenavn,
-               FungerendeLederEmail      AS leder_email
-        FROM [ORG].[adm].[Bruger_AD_PrimærKonto_Aktuel]
-        WHERE BrugerNavn IN ({placeholders})
+        SELECT p.BrugerNavn              AS az,
+               p.FungPersLederBrugerNavn AS leder_brugernavn,
+               p.FungPersLederKaldeNavn  AS leder_kaldenavn,
+               p.LederSelv               AS leder_selv,
+               m.Email                   AS leder_email
+        FROM [ORG].[adm].[Bruger_Personaleleder] p
+        OUTER APPLY (
+            SELECT TOP 1 pl.Email
+            FROM [FDW].[pdb].[PersonLight_udvidet] pl
+            WHERE pl.Azident = p.FungPersLederBrugerNavn
+              AND pl.Email IS NOT NULL
+            ORDER BY pl.Loadtime DESC
+        ) m
+        WHERE p.BrugerNavn IN ({placeholders})
     """
-    ledere_alle = pd.read_sql(query_leder, conn_org, params=azer_db)
+    ledere = pd.read_sql(query_leder, conn_org, params=azer)
+    ledere["az"] = ledere["az"].str.strip().str.lower()
 
-    # Casefold az på ORG-siden så join matcher az_map
-    ledere_alle["az"] = ledere_alle["az"].astype(str).str.strip().str.casefold()
+    # Advar hvis en medarbejder har flere personaleledere, og behold én
+    flere = ledere[ledere.duplicated("az", keep=False)]
+    if not flere.empty:
+        print(f"⚠  {flere['az'].nunique()} az'er har mere end én personaleleder")
+    ledere = ledere.drop_duplicates(subset="az", keep="first")
+    ledere["i_personaleleder"] = True
 
-    # Filtrer til Teknik og Miljø på normaliseret tekst
-    mask_tm = ledere_alle["niveau2"].map(_norm) == _norm("Teknik og Miljø")
-    ledere_tm = ledere_alle[mask_tm].drop(columns="niveau2").drop_duplicates()
-    tm_az = set(ledere_tm["az"])
+    df = df.merge(ledere, on="az", how="left")
+    df["i_personaleleder"] = df["i_personaleleder"].eq(True)
 
-    # DEBUG B: overlever az'en TM-filteret?
-    if AZ is not None:
-        print(f"B. AZ i ledere_tm (TM-filtreret): {(ledere_tm['az'] == AZ).any()}")
+    # Find årsagen, når en medarbejder mangler leder eller ledermail
+    def find_mangel(row):
+        if pd.isna(row["az"]):
+            return "1. Ingen az (medarbejdernummer ikke fundet i Opus)"
+        if not row["i_personaleleder"]:
+            return "2. az findes ikke i Bruger_Personaleleder"
+        if pd.isna(row["leder_brugernavn"]):
+            return "3. Står i Bruger_Personaleleder, men uden leder"
+        if pd.isna(row["leder_email"]):
+            return "4. Leder fundet, men ingen mail i PersonLight_udvidet"
+        return None
 
-    # ALLE az'er for medarbejdere med mere end 1 az - med TM-markering
-    az_pr_medarb = az_map.groupby("medarbejder_id")["az"].nunique()
-    flere_az = az_pr_medarb[az_pr_medarb > 1]
-    if len(flere_az):
-        vis = az_map[az_map["medarbejder_id"].isin(flere_az.index)].copy()
-        vis["i_TM"] = vis["az"].isin(tm_az)
-        print(f"\n⚠  {len(flere_az)} medarbejder(e) med flere az - ALLE fundne az'er:")
-        print(vis.sort_values(["medarbejder_id", "az"]).to_string(index=False))
+    df["mangel"] = df.apply(find_mangel, axis=1)
+    mangler = df[df["mangel"].notna()]
+
+    if mangler.empty:
+        print("✅ Alle medarbejdere har en leder med mail")
     else:
-        print("\nIngen medarbejdere med flere az.")
-
-    print("\n--- 3. LEDER-OPSLAG (ORG, kun Teknik og Miljø) ---")
-    print(f"az før TM-filter:          {len(azer)}")
-    print(f"az efter TM-filter:        {ledere_tm['az'].nunique()}")
-
-    # Print de az'er der frasorteres af TM-filteret (ikke i Teknik og Miljø)
-    fjernede = az_map[~az_map["az"].isin(tm_az)]
-    if len(fjernede):
-        fjernede = fjernede.merge(
-            ledere_alle[["az", "niveau2"]].drop_duplicates(), on="az", how="left"
+        print(
+            f"\n⚠  {mangler['medarbejder_id'].nunique()} medarbejdere mangler "
+            f"leder eller ledermail ({mangler['ikke_reg_timer'].sum():.2f} timer)\n"
         )
-        print(f"⚠  {fjernede['az'].nunique()} az frasorteret (ej Teknik og Miljø) - VÆRDIER:")
-        print(fjernede.drop_duplicates(subset=["medarbejder_id", "az"])
-              .sort_values("medarbejder_id").to_string(index=False))
-    else:
-        print("Ingen az frasorteret af TM-filteret.")
-
-    # Kobl TM-az'er tilbage til medarbejder (inner => ikke-TM az'er falder fra)
-    tm = az_map.merge(ledere_tm, on="az", how="inner")
-
-    # DEBUG C: kom NR med igennem az_map->ledere_tm koblingen?
-    if NR is not None:
-        print(f"C. NR i tm (efter az->leder join): {(tm['medarbejder_id'] == NR).any()}")
-
-    # 3b. TJEK: har et id STADIG mere end 1 az efter TM-filter? -> FEJL
-    az_efter = tm.groupby("medarbejder_id")["az"].nunique()
-    bad_ids = az_efter[az_efter > 1]
-    if len(bad_ids):
-        print(f"\n❌ {len(bad_ids)} medarbejder(e) har FLERE az selv efter TM-filter:")
-        print(tm[tm["medarbejder_id"].isin(bad_ids.index)]
-              [["medarbejder_id", "az", "leder_brugernavn"]]
-              .sort_values("medarbejder_id").to_string(index=False))
-        raise ValueError(
-            "Flere az i Teknik og Miljø for medarbejder-id: "
-            f"{bad_ids.index.tolist()} - kan ikke afgøre entydig az."
-        )
-    print("Alle medarbejdere har ≤1 az efter TM-filter ✅")
-
-    # tm har nu ≤1 række pr. medarbejder_id -> merge giver INGEN fan-out
-    df = df.merge(tm, on="medarbejder_id", how="left")
-
-    # DEBUG D: hvad står der på NR efter det sidste merge?
-    if NR is not None:
-        print("D. NR efter df-merge:")
-        print(df.loc[df["medarbejder_id"] == NR,
-              ["medarbejder_id", "az", "leder_brugernavn"]].to_string(index=False))
-
-    # Fjern rækker hvor personen er sin EGEN leder (az == leder_brugernavn)
-    egen_leder = df["az"].notna() & df["leder_brugernavn"].notna() & (
-        df["az"].astype(str).str.casefold()
-        == df["leder_brugernavn"].astype(str).str.casefold()
-    )
-    if egen_leder.any():
-        fjern = (df[egen_leder]
-                 .groupby("az")["ikke_reg_timer"]
-                 .agg(["size", "sum"])
-                 .reset_index()
-                 .rename(columns={"size": "antal_rækker", "sum": "timer"}))
-        print(f"\n⚠  EGEN LEDER: fjerner {egen_leder.sum()} række(r) / "
-              f"{df.loc[egen_leder, 'ikke_reg_timer'].sum()} timer "
-              f"({fjern['az'].nunique()} person(er)):")
-        print(fjern.sort_values("timer", ascending=False).to_string(index=False))
-            # DEBUG: vis hvad der faktisk sammenlignes for de matchede
-    if egen_leder.any():
-        prøve = df.loc[egen_leder, ["medarbejder_id", "az", "leder_brugernavn"]].drop_duplicates()
-        print("\nDEBUG egen-leder - faktiske værdier der matcher:")
-        print(prøve.head(20).to_string(index=False))
-        df = df[~egen_leder].copy()
-    else:
-        print("\nIngen personer er deres egen leder.")
-
-    print(f"\nRækker efter merge:        {len(df)}")
-    print(f"Rækker UDEN TM-leder:      {df['leder_brugernavn'].isna().sum()}")
-    print(f"TIMER I ALT efter merge:   {df['ikke_reg_timer'].sum()}")
-
-    # Medarbejdere hvis timer IKKE havner på en leder
-    uden_leder = df[df["leder_brugernavn"].isna()]
-    if len(uden_leder):
-        opsummeret = (
-            uden_leder.groupby("medarbejder_id")
-            .agg(
-                az=("az", "first"),
-                antal_rækker=("ikke_reg_timer", "size"),
-                timer=("ikke_reg_timer", "sum"),
+        for mangel, gruppe in mangler.groupby("mangel"):
+            pr_medarb = (
+                gruppe.groupby(
+                    ["medarbejder_id", "az", "leder_selv", "leder_brugernavn"],
+                    dropna=False,
+                )["ikke_reg_timer"]
+                .sum()
+                .reset_index()
+                .sort_values("ikke_reg_timer", ascending=False)
             )
-            .reset_index()
-            .sort_values("timer", ascending=False)
-        )
-        print(f"\n⚠  {len(opsummeret)} medarbejder(e) UDEN leder - "
-              f"{opsummeret['timer'].sum()} timer falder ud:")
-        print(opsummeret.to_string(index=False))
-    else:
-        print("\nAlle medarbejdere koblet til en leder ✅")
+            print(
+                f"--- {mangel}: {len(pr_medarb)} medarbejdere, "
+                f"{pr_medarb['ikke_reg_timer'].sum():.2f} timer"
+            )
+            print(pr_medarb.to_string(index=False))
+            print()
 
-    # 4. Sum ikke-reg. timer pr. leder (gruppér på brugernavn = stabil nøgle)
+        # # Gem listen, så den kan sendes videre eller undersøges i Excel
+        # mangler_path = os.path.join(os.getcwd(), "ManglerLeder.csv")
+        # (
+        #     mangler.groupby(
+        #         ["mangel", "medarbejder_id", "az", "leder_selv", "leder_brugernavn"],
+        #         dropna=False,
+        #     )["ikke_reg_timer"]
+        #     .sum()
+        #     .reset_index()
+        #     .to_csv(mangler_path, sep=";", decimal=",", index=False, encoding="utf-8-sig")
+        # )
+        # print(f"Liste over manglende ledere gemt i {mangler_path}")
+
+    # 4. Sum ikke-reg. timer pr. leder
     resultat = (
-        df.groupby("leder_brugernavn", dropna=False)
-          .agg(
-              leder_kaldenavn=("leder_kaldenavn", "first"),
-              leder_email=("leder_email", "first"),
-              ikke_reg_timer=("ikke_reg_timer", "sum"),
-          )
-          .reset_index()
-          .sort_values("ikke_reg_timer", ascending=False)
+        df.groupby(
+            ["leder_brugernavn", "leder_kaldenavn", "leder_email"],
+            dropna=False,
+        )["ikke_reg_timer"]
+        .sum()
+        .reset_index()
+        .sort_values("ikke_reg_timer", ascending=False)
     )
 
-    print("\n--- 4. RESULTAT ---")
-    print(f"Antal ledere i resultat:   {len(resultat)}")
-    print(f"TIMER I ALT (resultat):    {resultat['ikke_reg_timer'].sum()}")
-    print(f"TIMER I ALT (rå Excel):    {total_excel}")
     diff = resultat["ikke_reg_timer"].sum() - total_excel
-    print(f"(Difference forventes pga. egen-leder + evt. umatchede: {diff})")
+    if abs(diff) > 0.01:
+        print(f"⚠  DIFFERENCE: {diff}  (resultat matcher IKKE Excel-total!)")
+    else:
+        print("✅ Total matcher Excel-total")
 
-    print("\nTop 5 ledere:")
-    print(resultat.head(5).to_string(index=False))
-
-    # Tilføj total-række nederst (kun i CSV, ikke i returværdien)
-    total_row = pd.DataFrame([{
-        "leder_brugernavn": "TOTAL",
-        "leder_kaldenavn": "",
-        "leder_email": "",
-        "ikke_reg_timer": resultat["ikke_reg_timer"].sum(),
-    }])
-    resultat_csv = pd.concat([resultat, total_row], ignore_index=True)
-
-    # Skriv til CSV (dansk Excel: semikolon, komma-decimal)
-    csv_path = os.path.join(os.getcwd(), "TimerPerLeder.csv")
-    resultat_csv.to_csv(csv_path, sep=";", decimal=",", index=False, encoding="utf-8-sig")
-    print(f"\n✅ Resultat skrevet til: {csv_path}")
-    print("=" * 60)
+    # Skriv resultat til CSV (dansk Excel: semikolon-separator, komma-decimal)
+    # csv_path = os.path.join(os.getcwd(), "TimerPerLeder.csv")
+    # resultat.to_csv(
+    #     csv_path,
+    #     sep=";",
+    #     decimal=",",
+    #     index=False,
+    #     encoding="utf-8-sig",   # -sig sikrer at æ/ø/å vises rigtigt i Excel
+    # )
 
     return resultat
 

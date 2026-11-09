@@ -32,6 +32,8 @@ sandbox.py
 Script, forfaldne faktura, MTM.vbs
 SDLoen_27.08.2025.xlsx
 Opus data til afst.xlsx
+ManglerLeder.csv
+TimerPerLeder.csv
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
