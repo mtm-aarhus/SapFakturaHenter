@@ -41,7 +41,7 @@ def byg_beskeder(resultat: pd.DataFrame, noegle: str) -> tuple[list[str], list[s
             "oprettet": nu.isoformat(),
             "email": række.leder_email,
             "navn": række.leder_kaldenavn,
-            "timer": round(float(række.ikke_reg_timer), 2),
+            "timer": round(float(række.ikke_reg_timer), 1),
         }
         token = fernet.encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
         if len(token) > MAX_DATA_LAENGDE:

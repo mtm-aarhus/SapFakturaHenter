@@ -19,6 +19,7 @@ from openpyxl import load_workbook, Workbook
 import pyodbc
 import pandas as pd
 from reminder_beskeder import laeg_i_koe
+from timer_rapporter import lav_pivot_rapport, send_timer_rapport
 
 def process(orchestrator_connection: OrchestratorConnection) -> None:
     
@@ -400,19 +401,36 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                 upload_to_sharepoint(Client, filepath, parent_folder_url, site_url_str=sharepoint_site_url)
 
                 if datetime.today().weekday() == 2:
+                    resultat = detaljer = None
                     try:
-                        print("▶ Lægger reminders i kø (onsdag)")
                         sql_server_f = orchestrator_connection.get_constant("sqlserverf").value
                         conn_string_f = f"DRIVER={{SQL Server}};SERVER={sql_server_f};DATABASE=FDW;Trusted_Connection=yes;"
                         conn_f = pyodbc.connect(conn_string_f)
                         try:
-                            resultat = timerPerLeder(conn_f)
+                            resultat, detaljer = timerPerLeder(conn_f)
                         finally:
                             conn_f.close()
-
-                        laeg_i_koe(orchestrator_connection, resultat, "LederTimerReminder")
                     except Exception as e:
-                        orchestrator_connection.log_error(f'MTM reminders fejlede {e}')
+                        orchestrator_connection.log_error(f'MTM leder-opslag fejlede {e}')
+
+                    if resultat is not None:
+                        try:
+                            print("▶ Lægger reminders i kø (onsdag)")
+                            laeg_i_koe(orchestrator_connection, resultat, "LederTimerReminder")
+                        except Exception as e:
+                            orchestrator_connection.log_error(f'MTM reminders fejlede {e}')
+
+                    if detaljer is not None:
+                        rapport_sti = os.path.join(cwd, f"IkkeGodkendteTimer_{datetime.today():%Y-%m-%d}.xlsx")
+                        try:
+                            print("▶ Sender timerrapport (onsdag)")
+                            if lav_pivot_rapport(detaljer, rapport_sti):
+                                send_timer_rapport(orchestrator_connection, rapport_sti)
+                        except Exception as e:
+                            orchestrator_connection.log_error(f'MTM timerrapport fejlede {e}')
+                        finally:
+                            if os.path.exists(rapport_sti):
+                                os.remove(rapport_sti)
 
             except Exception as e:
                 close_all_sap()
@@ -487,6 +505,7 @@ def timerPerLeder(conn_org):
     placeholders = ",".join("?" * len(azer))
     query_leder = f"""
         SELECT p.BrugerNavn              AS az,
+               p.KaldeNavn               AS medarbejder_navn,
                p.FungPersLederBrugerNavn AS leder_brugernavn,
                p.FungPersLederKaldeNavn  AS leder_kaldenavn,
                p.LederSelv               AS leder_selv,
@@ -593,4 +612,4 @@ def timerPerLeder(conn_org):
     #     encoding="utf-8-sig",   # -sig sikrer at æ/ø/å vises rigtigt i Excel
     # )
 
-    return resultat
+    return resultat, df
