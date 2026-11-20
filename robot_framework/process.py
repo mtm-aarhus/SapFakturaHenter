@@ -415,8 +415,13 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
                     if resultat is not None:
                         try:
+                            undtagne = hent_undtagne_ledere(orchestrator_connection)
+                            leder_az = resultat["leder_brugernavn"].fillna("").str.strip().str.lower()
+                            til_koe = resultat[~leder_az.isin(undtagne)]
+                            if len(til_koe) < len(resultat):
+                                print(f"Springer {len(resultat) - len(til_koe)} undtagne ledere over")
                             print("▶ Lægger reminders i kø (onsdag)")
-                            laeg_i_koe(orchestrator_connection, resultat, "LederTimerReminder")
+                            laeg_i_koe(orchestrator_connection, til_koe, "LederTimerReminder")
                         except Exception as e:
                             orchestrator_connection.log_error(f'MTM reminders fejlede {e}')
 
@@ -613,3 +618,12 @@ def timerPerLeder(conn_org):
     # )
 
     return resultat, df
+
+def hent_undtagne_ledere(orchestrator_connection) -> set[str]:
+    """az-identer på ledere, der ikke skal have remindermail."""
+    try:
+        raw = orchestrator_connection.get_constant("MTMTimerReminderUndtagneLedere").value or ""
+    except Exception:
+        print("Konstanten MTMTimerReminderUndtagneLedere findes ikke – ingen ledere undtages")
+        return set()
+    return {a.strip().lower() for a in raw.replace(";", ",").split(",") if a.strip()}

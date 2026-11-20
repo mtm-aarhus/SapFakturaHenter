@@ -1,7 +1,7 @@
 """
-Test af timerrapporten (pivottabel pr. leder).
+Test af timerrapporten (pivottabel: Leder -> Medarbejder -> Dato).
 
-Kører:   SAP-udtræk (valgfrit) -> leder-opslag -> pivot-Excel -> mail til konstanten 'balas'
+Kører:      SAP-udtræk (valgfrit) -> leder-opslag -> pivot-Excel -> mail til konstanten 'balas'
 Kører IKKE: SharePoint-upload, køelementer, mail til de rigtige modtagere.
 """
 import os
@@ -12,15 +12,15 @@ from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConn
 
 import timer_rapporter
 from timer_rapporter import lav_pivot_rapport, send_timer_rapport
-from robot_framework.process import timerPerLeder
+from robot_framework.process import timerPerLeder, hent_undtagne_ledere
 from robot_framework.initialize_sap import initialize_sap
 from scripts import MTMIkkeGodkendteTimer, close_all_sap
 from sap_popup_utils import start_popup_watcher
 
 # ---------------- Indstillinger ----------------
-BRUG_EKSISTERENDE_FIL = True   
-SEND_MAIL = True               
-BEHOLD_RAPPORT = False          
+BRUG_EKSISTERENDE_FIL = True   # True: genbrug MTMIkkeGodkendteTimer.xlsx hvis den findes, ellers køres SAP
+SEND_MAIL = False              # True: send rapporten til TEST_MODTAGER_KONSTANT
+BEHOLD_RAPPORT = True          # True: lad rapporten ligge, så du kan åbne den bagefter
 TEST_MODTAGER_KONSTANT = "balas"
 # -----------------------------------------------
 
@@ -56,7 +56,7 @@ else:
         close_all_sap()
         raise
 
-# 2. Slå ledere op (ingen kø)
+# 2. Slå ledere op
 sql_server_f = orchestrator_connection.get_constant("sqlserverf").value
 conn_f = pyodbc.connect(
     f"DRIVER={{SQL Server}};SERVER={sql_server_f};DATABASE=FDW;Trusted_Connection=yes;"
@@ -66,12 +66,18 @@ try:
 finally:
     conn_f.close()
 
-print("\nDette VILLE være lagt i køen (gøres ikke i test):")
-print(resultat.head(15).to_string(index=False))
-print(f"... {len(resultat)} ledere i alt\n")
-print(f"Kolonner i SAP-udtrækket: {list(detaljer.columns)}\n")
+print(f"\nKolonner i udtrækket: {list(detaljer.columns)}\n")
 
-# 3. Lav rapport og send til testmodtager
+# 3. Vis hvad der VILLE være lagt i køen (intet lægges i kø)
+undtagne = hent_undtagne_ledere(orchestrator_connection)
+leder_az = resultat["leder_brugernavn"].fillna("").str.strip().str.lower()
+til_koe = resultat[~leder_az.isin(undtagne)]
+print(f"Undtagne ledere: {sorted(undtagne) or 'ingen'}")
+print(f"Ledere i alt: {len(resultat)} – ville lægges i kø: {len(til_koe)} (gøres ikke i test)")
+print(til_koe.head(15).to_string(index=False))
+print()
+
+# 4. Lav rapport og evt. send til testmodtager
 try:
     if lav_pivot_rapport(detaljer, rapport_sti):
         print(f"✅ Rapport lavet: {rapport_sti}")

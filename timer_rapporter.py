@@ -24,6 +24,31 @@ NAVN_KOLONNER = [
     "Formateret navn på medarbejder eller ansøger",
 ]
 
+# Mulige navne på kolonnen med registreringsdato i SAP-udtrækket (første match bruges).
+DATO_KOLONNER = [
+    "Dato",
+    "Arbejdsdato",
+    "Registreringsdato",
+    "Dato for registrering",
+]
+
+UGEDAGE = ["man", "tir", "ons", "tor", "fre", "lør", "søn"]
+INGEN_DATO = "(ingen dato)"
+
+# Udseende – skift stilnavnene her, hvis I vil have en anden farve
+# (fx "PivotStyleMedium9" = mørkeblå, "PivotStyleMedium7" = grøn, "PivotStyleMedium4" = orange)
+PIVOT_STIL = "TableStyleMedium4"
+DATA_STIL = "TableStyleMedium4"
+
+
+def _rgb(r: int, g: int, b: int) -> int:
+    """Excel bruger BGR-heltal til farver."""
+    return r + g * 256 + b * 65536
+
+
+TITEL_FARVE = _rgb(31, 56, 100)    # mørkeblå
+HJAELP_FARVE = _rgb(110, 110, 110)  # grå
+
 TAL_FORMAT = "#,##0.0"  # én decimal
 
 # Excel-konstanter
@@ -35,20 +60,20 @@ XL_DECIMAL_SEPARATOR = 3
 XL_THOUSANDS_SEPARATOR = 4
 
 
-def _find_navnekolonne(kolonner) -> str | None:
+def _find_kolonne(kolonner, kandidater) -> str | None:
     normaliseret = {str(k).strip().lower(): k for k in kolonner}
-    for kandidat in NAVN_KOLONNER:
+    for kandidat in kandidater:
         if kandidat.lower() in normaliseret:
             return normaliseret[kandidat.lower()]
     return None
 
 
 def lav_pivot_rapport(detaljer: pd.DataFrame, sti: str) -> str | None:
-    """Skriver data og bygger en pivottabel: Leder -> Medarbejder, sorteret efter flest timer."""
+    """Skriver data og bygger en pivottabel: Leder -> Medarbejder -> Dato, sorteret efter flest timer."""
     # Fjern totalrækken fra SAP-udtrækket (den har intet medarbejdernummer)
     detaljer = detaljer[detaljer["medarbejder_id"].notna()]
 
-    navn_kol = _find_navnekolonne(detaljer.columns)
+    navn_kol = _find_kolonne(detaljer.columns, NAVN_KOLONNER)
     if navn_kol is None:
         print(f"⚠  Fandt ingen navnekolonne. Kolonner i udtrækket: {list(detaljer.columns)}")
         navn = pd.Series("(ukendt navn)", index=detaljer.index)
@@ -65,6 +90,21 @@ def lav_pivot_rapport(detaljer: pd.DataFrame, sti: str) -> str | None:
         # så kvarterer (0,25) stadig summeres præcist. Visningen er 1 decimal.
         "Timer": detaljer["ikke_reg_timer"].fillna(0).round(2),
     })
+
+    # Dato som tekst (dd-mm-åååå + ugedag), så Excel ikke selv grupperer i måneder/kvartaler
+    dato_kol = _find_kolonne(detaljer.columns, DATO_KOLONNER)
+    datoer = []
+    if dato_kol is None:
+        print(f"⚠  Fandt ingen datokolonne – rapporten laves uden datoer. Kolonner: {list(detaljer.columns)}")
+    else:
+        print(f"Bruger '{dato_kol}' som registreringsdato")
+        parsed = pd.to_datetime(detaljer[dato_kol], errors="coerce", dayfirst=True)
+        data["Dato"] = [
+            f"{d:%d-%m-%Y} ({UGEDAGE[d.weekday()]})" if pd.notna(d) else INGEN_DATO
+            for d in parsed
+        ]
+        datoer = sorted(parsed.dropna().unique())
+
     data = data[data["Timer"] != 0]
     if data.empty:
         print("Ingen ikke godkendte timer – ingen rapport")
@@ -101,6 +141,10 @@ def lav_pivot_rapport(detaljer: pd.DataFrame, sti: str) -> str | None:
         medarb = pt.PivotFields("Medarbejder")
         medarb.Orientation = XL_ROW_FIELD
         medarb.Position = 2
+        if "Dato" in data.columns:
+            dato = pt.PivotFields("Dato")
+            dato.Orientation = XL_ROW_FIELD
+            dato.Position = 3
 
         sum_felt = pt.AddDataField(pt.PivotFields("Timer"), "Ikke godkendte timer", XL_SUM)
 
@@ -109,10 +153,52 @@ def lav_pivot_rapport(detaljer: pd.DataFrame, sti: str) -> str | None:
         # Sæt formatet igen efter layout/sortering, både på feltet og på de synlige celler
         sum_felt.NumberFormat = lokalt_format
         pt.DataBodyRange.NumberFormatLocal = lokalt_format
+        if "Dato" in data.columns:
+            # Kronologisk rækkefølge (tekst ville ellers sortere 01-12 før 02-11)
+            labels_i_data = set(data["Dato"])
+            pos = 1
+            for d in datoer:
+                d = pd.Timestamp(d)
+                label = f"{d:%d-%m-%Y} ({UGEDAGE[d.weekday()]})"
+                if label in labels_i_data:
+                    dato.PivotItems(label).Position = pos
+                    pos += 1
+            medarb.ShowDetail = False  # medarbejdere foldet sammen, så datoerne skjules
         leder.ShowDetail = False  # alle ledere foldet sammen fra start
 
-        ws_pivot.Range("A1").Value = f"Ikke godkendte timer pr. {datetime.today():%d-%m-%Y}"
+        # --- Udseende (fejler det, laves rapporten stadig, bare uden pynt) ---
+        try:
+            pt.TableStyle2 = PIVOT_STIL
+            pt.ShowTableStyleRowStripes = True
+            pt.ShowTableStyleRowHeaders = True
+            pt.CompactLayoutRowHeader = "Leder / medarbejder / dato"
+
+            ws_pivot.Columns("A").ColumnWidth = 55
+            ws_pivot.Columns("B").ColumnWidth = 24
+
+            titel = ws_pivot.Range("A1")
+            titel.Value = f"Ikke godkendte timer pr. {datetime.today():%d-%m-%Y}"
+            titel.Font.Size = 16
+            titel.Font.Bold = True
+            titel.Font.Color = TITEL_FARVE
+
+            hjaelp = ws_pivot.Range("A2")
+            hjaelp.Value = "Klik på + ud for en leder for at se medarbejderne, og på en medarbejder for at se dagene."
+            hjaelp.Font.Italic = True
+            hjaelp.Font.Color = HJAELP_FARVE
+
+            tabel = ws_data.ListObjects.Add(1, ws_data.Range("A1").CurrentRegion, None, 1)
+            tabel.Name = "TimerData"
+            tabel.TableStyle = DATA_STIL
+            ws_data.UsedRange.Columns.AutoFit()
+        except Exception as e:
+            print(f"⚠  Kunne ikke sætte alt layout: {e}")
+
         ws_pivot.Activate()
+        try:
+            xl.ActiveWindow.DisplayGridlines = False  # rent ark uden gitterlinjer
+        except Exception:
+            pass
         wb.Save()
         wb.Close(SaveChanges=False)
     finally:
@@ -134,8 +220,8 @@ def send_timer_rapport(orchestrator_connection, sti: str) -> None:
     msg.set_content("Please enable HTML to view this message.")
     msg.add_alternative(
         "<html><body><p>Hej</p>"
-        "<p>Vedhæftet er oversigten over ikke godkendte timer pr. leder. "
-        "Vh. robotten :)</p></body></html>",
+        "<p>Vedhæftet er oversigten over ikke godkendte timer pr. leder, sorteret med flest timer først. "
+        "Fold en leder ud for at se fordelingen på medarbejdere.</p></body></html>",
         subtype="html",
     )
     with open(sti, "rb") as f:
